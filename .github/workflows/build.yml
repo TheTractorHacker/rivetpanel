@@ -17,7 +17,7 @@ jobs:
 
       # Pinned explicitly (rather than relying on windows-latest's default)
       # since the installer now refuses to run on non-x64 Windows
-      # (ArchitecturesAllowed=x64 in ITPanelPro.iss) - a 32-bit build here
+      # (ArchitecturesAllowed=x64 in RivetPanel.iss) - a 32-bit build here
       # would produce an exe the installer itself would reject.
       - uses: actions/setup-python@v5
         with:
@@ -30,34 +30,34 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Select PSA provider (itflow)
-        run: python scripts/select_provider.py itflow
+      - name: Select PSA provider (rivet)
+        run: python scripts/select_provider.py rivet
 
       - name: Build tray app exe with PyInstaller
         working-directory: Windows
-        run: pyinstaller itpanel_pro.spec
+        run: pyinstaller rivetpanel.spec
 
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
 
       - name: Build installer
-        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\ITPanelPro.iss'
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\RivetPanel.iss'
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: itpanel-pro-windows
+          name: rivetpanel-windows
           path: |
-            Windows/dist/ITPanelPro.exe
-            installer/Output/ITPanelProSetup.exe
+            Windows/dist/RivetPanel.exe
+            installer/Output/RivetPanelSetup.exe
 
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            Windows/dist/ITPanelPro.exe
-            installer/Output/ITPanelProSetup.exe
+            Windows/dist/RivetPanel.exe
+            installer/Output/RivetPanelSetup.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -81,33 +81,33 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Select PSA provider (itflow)
-        run: python scripts/select_provider.py itflow
+      - name: Select PSA provider (rivet)
+        run: python scripts/select_provider.py rivet
 
       - name: Build binary with PyInstaller
         working-directory: Linux
-        run: pyinstaller itpanel_pro.spec
+        run: pyinstaller rivetpanel.spec
 
       - name: Package release bundle
         working-directory: Linux
         run: |
           mkdir -p package
-          cp dist/ITPanelPro package/
-          cp install.sh itpanel-pro.desktop package/
+          cp dist/RivetPanel package/
+          cp install.sh rivetpanel.desktop package/
           cp -r assets package/
-          tar -czf itpanel-pro-linux.tar.gz -C package .
+          tar -czf rivetpanel-linux.tar.gz -C package .
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: itpanel-pro-linux
-          path: Linux/itpanel-pro-linux.tar.gz
+          name: rivetpanel-linux
+          path: Linux/rivetpanel-linux.tar.gz
 
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: Linux/itpanel-pro-linux.tar.gz
+          files: Linux/rivetpanel-linux.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -126,32 +126,32 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Select PSA provider (itflow)
-        run: python scripts/select_provider.py itflow
+      - name: Select PSA provider (rivet)
+        run: python scripts/select_provider.py rivet
 
       - name: Build app with PyInstaller
         working-directory: macOS
-        run: pyinstaller itpanel_pro.spec
+        run: pyinstaller rivetpanel.spec
 
       - name: Package release bundle
         working-directory: macOS
         run: |
           mkdir -p package
-          cp -R dist/ITPanelPro.app package/
-          cp install.sh com.foleyit.itpanelpro.plist package/
-          cd package && zip -r ../itpanel-pro-macos.zip .
+          cp -R dist/RivetPanel.app package/
+          cp install.sh com.foleyit.rivetpanel.plist package/
+          cd package && zip -r ../rivetpanel-macos.zip .
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: itpanel-pro-macos
-          path: macOS/itpanel-pro-macos.zip
+          name: rivetpanel-macos
+          path: macOS/rivetpanel-macos.zip
 
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: macOS/itpanel-pro-macos.zip
+          files: macOS/rivetpanel-macos.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -188,10 +188,10 @@ jobs:
         run: |
           mkdir -p signed
           python3 scripts/sign_release.py "$RELEASE_SIGNING_PRIVATE_KEY" signed \
-            dist/itpanel-pro-windows/ITPanelPro.exe \
-            dist/itpanel-pro-windows/ITPanelProSetup.exe \
-            dist/itpanel-pro-linux/itpanel-pro-linux.tar.gz \
-            dist/itpanel-pro-macos/itpanel-pro-macos.zip
+            dist/rivetpanel-windows/RivetPanel.exe \
+            dist/rivetpanel-windows/RivetPanelSetup.exe \
+            dist/rivetpanel-linux/rivetpanel-linux.tar.gz \
+            dist/rivetpanel-macos/rivetpanel-macos.zip
 
       - name: Upload checksums + signature to the release
         uses: softprops/action-gh-release@v2

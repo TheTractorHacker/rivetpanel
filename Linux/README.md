@@ -1,12 +1,12 @@
-# ITPanel Pro (Linux)
+# RivetPanel (Linux)
 
 A system tray app for Linux desktops, equivalent to the
-[Windows tray app](../Windows), letting end users submit an ITFlow support
+[Windows tray app](../Windows), letting end users submit an RivetIT/RivetMSP support
 ticket — with an optional screenshot — directly from the tray.
 
 ## Requirements
 
-Requires **[ITFlow MSP — From TheTractorHacker](https://github.com/TheTractorHacker/itflow) v2.11.32 or later**
+Requires **[RivetIT or RivetMSP](https://github.com/TheTractorHacker/RivetIT) v2.11.32 or later**
 (multipart attachment support on `POST /api/v1/tickets`).
 
 The packaged binary is a self-contained PyInstaller build, but it still
@@ -21,11 +21,11 @@ depends on a few things being present on the target system:
 ## Repo layout
 
 - `tray_app.py` — entry point; shared UI/logic lives in `../common/core.py`
-- `itpanel_pro.spec` — PyInstaller spec, produces a single-file
-  `ITPanelPro` binary
-- `itpanel-pro.desktop` — XDG autostart entry
-- `install.sh` — installs the binary to `/opt/itpanel-pro`, writes
-  `/etc/itpanel-pro/config.json`, and registers autostart
+- `rivetpanel.spec` — PyInstaller spec, produces a single-file
+  `RivetPanel` binary
+- `rivetpanel.desktop` — XDG autostart entry
+- `install.sh` — installs the binary to `/opt/rivetpanel`, writes
+  `/etc/rivetpanel/config.json`, and registers autostart
 - `assets/` — branded icons
 
 ## Getting a build
@@ -33,7 +33,7 @@ depends on a few things being present on the target system:
 ### Option A: GitHub Actions
 
 Push a tag like `v1.3.0` (or run the workflow manually) and GitHub Actions
-builds on `ubuntu-latest`, producing `ITPanelPro` and attaching it
+builds on `ubuntu-latest`, producing `RivetPanel` and attaching it
 (plus a tarball with `install.sh` and assets) to the GitHub release.
 
 ### Option B: Build locally on Linux
@@ -43,18 +43,18 @@ cd Linux
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-pyinstaller itpanel_pro.spec
-# binary at dist/ITPanelPro
+pyinstaller rivetpanel.spec
+# binary at dist/RivetPanel
 ```
 
 ## Installing
 
 ```bash
-sudo ./install.sh https://itflow.foleyit.com <API_KEY> <CLIENT_ID> [CONTACT_ID] [PRIORITY]
+sudo ./install.sh https://psa.example.com <API_KEY> <CLIENT_ID> [CONTACT_ID] [PRIORITY]
 ```
 
-This installs the binary to `/opt/itpanel-pro`, writes
-`/etc/itpanel-pro/config.json`, and adds an XDG autostart entry so
+This installs the binary to `/opt/rivetpanel`, writes
+`/etc/rivetpanel/config.json`, and adds an XDG autostart entry so
 the tray app starts for every user on next login (and launches it
 immediately if run from a graphical session).
 
@@ -62,19 +62,19 @@ immediately if run from a graphical session).
 
 Re-run `install.sh`. It stops any running instance, replaces the binary,
 and — if you omit the connection-setting arguments — keeps the existing
-`/etc/itpanel-pro/config.json`.
+`/etc/rivetpanel/config.json`.
 
 ## Config reference (`config.json`)
 
 Same fields as the [Windows app](../Windows/README.md#config-reference-configjson):
-`itflow_base_url`, `api_key`, `client_id`, `contact_id` (optional, or
+`rivet_base_url`, `api_key`, `client_id`, `contact_id` (optional, or
 `null`), `priority`, plus the optional `include_system_info`,
 `check_for_updates`, `accent_color`, and `branding_logo` fields.
 
 Config is read from, in order:
 
-1. `/etc/itpanel-pro/config.json` (system-wide, written by `install.sh`)
-2. `~/.config/itpanel-pro/config.json` (per-user override)
+1. `/etc/rivetpanel/config.json` (system-wide, written by `install.sh`)
+2. `~/.config/rivetpanel/config.json` (per-user override)
 3. `config.json` next to the binary
 
 ## Quick Tools notes

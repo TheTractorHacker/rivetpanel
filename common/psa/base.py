@@ -1,7 +1,7 @@
 """
 PSA/RMM provider interface.
 
-Every backend ITPanel Pro can talk to (ITFlow, Syncro, Atera, ...)
+Every backend RivetPanel can talk to (RivetIT/RivetMSP, Syncro, Atera, ...)
 implements PSAProvider. common/core.py's UI/background code is written
 entirely against this interface plus the normalized dataclasses below,
 never against a specific provider's request/response shapes.
@@ -42,13 +42,13 @@ class Category:
 
 class ChatUnavailable(Exception):
     """Raised by a provider's chat methods when live chat is temporarily or
-    permanently unusable server-side (e.g. ITFlow's "module disabled" 403).
+    permanently unusable server-side (e.g. RivetIT/RivetMSP's "module disabled" 403).
     core.py catches this generically instead of checking HTTP status codes."""
 
 
 class PSAProvider:
     """Base class for a PSA/RMM backend. One concrete subclass is compiled
-    into each ITPanel Pro build (see psa/__init__.py) - never more than one
+    into each RivetPanel build (see psa/__init__.py) - never more than one
     per running app, so no runtime provider switching exists."""
 
     name = "base"

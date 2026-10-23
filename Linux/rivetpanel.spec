@@ -1,8 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Build with: pyinstaller itpanel_pro.spec
+# Build with: pyinstaller rivetpanel.spec
 #
-# Produces a single-file, windowed (no console) .exe. config.json is NOT
-# bundled — it is deployed separately to %ProgramData%\ITPanelPro\.
+# Produces a single-file Linux binary. config.json is NOT bundled — it is
+# deployed separately to /etc/rivetpanel/config.json (see
+# install.sh).
 
 import os
 
@@ -13,8 +14,8 @@ a = Analysis(
     pathex=['../common'],
     binaries=[],
     datas=[
-        ('assets/icon.ico', 'assets'),
-    ] if os.path.exists('assets/icon.ico') else [],
+        ('assets/icon.png', 'assets'),
+    ] if os.path.exists('assets/icon.png') else [],
     hiddenimports=['PIL._tkinter_finder', 'cryptography.hazmat.bindings._rust'],
     hookspath=[],
     runtime_hooks=[],
@@ -31,7 +32,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='ITPanelPro',
+    name='RivetPanel',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -44,5 +45,4 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='assets/icon.ico' if os.path.exists('assets/icon.ico') else None,
 )

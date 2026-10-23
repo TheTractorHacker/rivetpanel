@@ -1,13 +1,13 @@
-# ITPanel Pro
+# RivetPanel
 
-[![Latest release](https://img.shields.io/github/v/release/TheTractorHacker/itpanel-pro?include_prereleases&label=release)](https://github.com/TheTractorHacker/itpanel-pro/releases/latest)
-[![Build apps and installers](https://github.com/TheTractorHacker/itpanel-pro/actions/workflows/build.yml/badge.svg)](https://github.com/TheTractorHacker/itpanel-pro/actions/workflows/build.yml)
+[![Latest release](https://img.shields.io/github/v/release/TheTractorHacker/rivetpanel?include_prereleases&label=release)](https://github.com/TheTractorHacker/rivetpanel/releases/latest)
+[![Build apps and installers](https://github.com/TheTractorHacker/rivetpanel/actions/workflows/build.yml/badge.svg)](https://github.com/TheTractorHacker/rivetpanel/actions/workflows/build.yml)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
 
-A lightweight tray/menu bar app that lets end users submit an ITFlow support
+A lightweight tray/menu bar app that lets end users submit an RivetIT/RivetMSP support
 ticket — with an optional screenshot or file attachment — in a few clicks,
 with no portal login. Intended for mass deployment via RMM, with all
-connection settings (ITFlow URL, API key, client ID, etc.) configured at
+connection settings (RivetIT/RivetMSP URL, API key, client ID, etc.) configured at
 install time so the end user never sees credentials.
 
 ## Screenshots
@@ -31,12 +31,12 @@ install time so the end user never sees credentials.
   attachment
 - Auto-attaches system info (hostname, OS, user, local IP) to help
   diagnose issues faster
-- Auto-links the ticket to the matching asset in ITFlow by hostname
-- Ticket category dropdown (when configured in ITFlow)
+- Auto-links the ticket to the matching asset in RivetIT/RivetMSP by hostname
+- Ticket category dropdown (when configured in RivetIT/RivetMSP)
 - Offline queue — tickets submitted while offline are sent automatically
   once connectivity returns
 - "My Recent Tickets" tray menu view
-- "Open Client Portal" button to open the ITFlow client portal in the browser
+- "Open Client Portal" button to open the RivetIT/RivetMSP client portal in the browser
 - Desktop notifications when a submitted ticket's status changes
 - Silent auto-update check against GitHub releases, with a one-click
   download-and-install update on Windows
@@ -54,7 +54,7 @@ install time so the end user never sees credentials.
 
 ## Requirements
 
-Requires **[ITFlow MSP — From TheTractorHacker](https://github.com/TheTractorHacker/itflow) v2.11.32 or later** —
+Requires **[RivetIT or RivetMSP](https://github.com/TheTractorHacker/RivetIT) v2.11.32 or later** —
 this is the version that added multipart/form-data attachment support to
 `POST /api/v1/tickets` (used to submit the optional screenshot alongside the
 ticket).

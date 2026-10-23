@@ -1,12 +1,12 @@
 """
-ITPanel Pro - Linux tray app
+RivetPanel - Linux tray app
 
-Lets end users submit an ITFlow support ticket (with an optional full-screen
+Lets end users submit an RivetIT/RivetMSP support ticket (with an optional full-screen
 screenshot) in a few clicks, without logging in to the client portal.
 
 Configuration is read from (in order of preference):
-  1. /etc/itpanel-pro/config.json   (system-wide, set by install.sh / RMM)
-  2. ~/.config/itpanel-pro/config.json
+  1. /etc/rivetpanel/config.json   (system-wide, set by install.sh / RMM)
+  2. ~/.config/rivetpanel/config.json
   3. config.json next to this script / the packaged binary
 
 See config.json for the expected fields. Shared UI/logic lives in

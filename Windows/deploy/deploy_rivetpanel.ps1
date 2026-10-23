@@ -1,16 +1,16 @@
 <#
 .SYNOPSIS
-    Mass Deployment script: deploys ITPanel Pro via TacticalRMM by silently
+    Mass Deployment script: deploys RivetPanel via TacticalRMM by silently
     running the Inno Setup installer with per-client configuration. Meant
     to be looped over a client list (e.g. by an RMM policy/schedule), unlike
     the interactive installer's own "Find Client / Contact" picker page,
     which is for one-off manual installs.
 
 .DESCRIPTION
-    Downloads ITPanelProSetup.exe and runs it with /VERYSILENT,
-    passing the ITFlow connection settings as install parameters. The
-    installer writes C:\ProgramData\ITPanelPro\config.json,
-    installs the app to C:\Program Files\ITPanelPro, and adds an
+    Downloads RivetPanelSetup.exe and runs it with /VERYSILENT,
+    passing the RivetIT/RivetMSP connection settings as install parameters. The
+    installer writes C:\ProgramData\RivetPanel\config.json,
+    installs the app to C:\Program Files\RivetPanel, and adds an
     All Users Startup shortcut. If a previous "ITFlow Quick Ticket" install
     is found, it is silently removed and its config is migrated.
 
@@ -18,15 +18,15 @@
     Run as a TacticalRMM script with type "powershell", running as System.
 
     Expected script arguments:
-        1. InstallerUrl   - URL to download ITPanelProSetup.exe from
+        1. InstallerUrl   - URL to download RivetPanelSetup.exe from
                              (e.g. attached to a GitHub release)
-        2. ItflowBaseUrl  - e.g. https://itflow.foleyit.com
-        3. ApiKey         - ITFlow API key (Admin > API Keys)
-        4. ClientId       - ITFlow client_id for this client, OR
-           ClientName     - ITFlow client name to look up via the API
+        2. RivetBaseUrl  - e.g. https://psa.example.com
+        3. ApiKey         - RivetIT/RivetMSP API key (Admin > API Keys)
+        4. ClientId       - RivetIT/RivetMSP client_id for this client, OR
+           ClientName     - RivetIT/RivetMSP client name to look up via the API
                              instead (must resolve to exactly one client)
-        5. ContactId      - (optional) ITFlow contact_id, or 0/blank, OR
-           ContactName    - (optional) ITFlow contact name to look up
+        5. ContactId      - (optional) RivetIT/RivetMSP contact_id, or 0/blank, OR
+           ContactName    - (optional) RivetIT/RivetMSP contact name to look up
                              within the resolved client instead
         6. Priority       - (optional) Low/Medium/High/Critical, default Medium
 
@@ -40,7 +40,7 @@
 
 param(
     [Parameter(Mandatory = $true)] [string]$InstallerUrl,
-    [Parameter(Mandatory = $true)] [string]$ItflowBaseUrl,
+    [Parameter(Mandatory = $true)] [string]$RivetBaseUrl,
     [Parameter(Mandatory = $true)] [string]$ApiKey,
     [int]$ClientId = 0,
     [string]$ClientName = "",
@@ -62,7 +62,7 @@ function Resolve-SingleMatch {
         [string]$Kind
     )
     if ($Candidates.Count -eq 0) {
-        throw "No ITFlow $Kind found matching '$Name'."
+        throw "No RivetIT/RivetMSP $Kind found matching '$Name'."
     }
     $exact = @($Candidates | Where-Object { $_.name -ieq $Name })
     if ($exact.Count -eq 1) {
@@ -72,15 +72,15 @@ function Resolve-SingleMatch {
         return $Candidates[0]
     }
     $list = ($Candidates | ForEach-Object { "'$($_.name)' (id $($_.id))" }) -join ", "
-    throw "'$Name' is ambiguous among ITFlow ${Kind}s: $list. Pass the ID directly instead."
+    throw "'$Name' is ambiguous among RivetIT/RivetMSP ${Kind}s: $list. Pass the ID directly instead."
 }
 
 if ($ClientId -le 0) {
     if (-not $ClientName) {
         throw "Either -ClientId or -ClientName is required."
     }
-    Write-Host "Looking up ITFlow client '$ClientName' ..."
-    $uri = "$($ItflowBaseUrl.TrimEnd('/'))/api/v1/clients?search=$([uri]::EscapeDataString($ClientName))&limit=10"
+    Write-Host "Looking up RivetIT/RivetMSP client '$ClientName' ..."
+    $uri = "$($RivetBaseUrl.TrimEnd('/'))/api/v1/clients?search=$([uri]::EscapeDataString($ClientName))&limit=10"
     $resp = Invoke-RestMethod -Uri $uri -Headers @{ "X-Api-Key" = $ApiKey } -UseBasicParsing
     $client = Resolve-SingleMatch -Candidates @($resp.data) -Name $ClientName -Kind "client"
     $ClientId = [int]$client.id
@@ -88,15 +88,15 @@ if ($ClientId -le 0) {
 }
 
 if ($ContactId -le 0 -and $ContactName) {
-    Write-Host "Looking up ITFlow contact '$ContactName' for client $ClientId ..."
-    $uri = "$($ItflowBaseUrl.TrimEnd('/'))/api/v1/contacts?client_id=$ClientId&search=$([uri]::EscapeDataString($ContactName))&limit=10"
+    Write-Host "Looking up RivetIT/RivetMSP contact '$ContactName' for client $ClientId ..."
+    $uri = "$($RivetBaseUrl.TrimEnd('/'))/api/v1/contacts?client_id=$ClientId&search=$([uri]::EscapeDataString($ContactName))&limit=10"
     $resp = Invoke-RestMethod -Uri $uri -Headers @{ "X-Api-Key" = $ApiKey } -UseBasicParsing
     $contact = Resolve-SingleMatch -Candidates @($resp.data) -Name $ContactName -Kind "contact"
     $ContactId = [int]$contact.id
     Write-Host "Resolved contact '$ContactName' -> id $ContactId ('$($contact.name)')"
 }
 
-$installerPath = Join-Path $env:TEMP "ITPanelProSetup.exe"
+$installerPath = Join-Path $env:TEMP "RivetPanelSetup.exe"
 
 Write-Host "Downloading installer from $InstallerUrl ..."
 Invoke-WebRequest -Uri $InstallerUrl -OutFile $installerPath -UseBasicParsing
@@ -107,7 +107,7 @@ $installerArgs = @(
     "/VERYSILENT",
     "/SUPPRESSMSGBOXES",
     "/NORESTART",
-    "/ItflowBaseUrl=$ItflowBaseUrl",
+    "/RivetBaseUrl=$RivetBaseUrl",
     "/ApiKey=$ApiKey",
     "/ClientId=$ClientId",
     "/ContactId=$contactArg",
@@ -136,7 +136,7 @@ Write-Host "Installer exit code: $($proc.ExitCode)"
 # flagged now rather than discovered later as a silent "app won't start".
 $vcRedistKey = "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64"
 if (-not (Test-Path $vcRedistKey)) {
-    Write-Host "WARNING: Visual C++ Runtime not detected after install - ITPanel Pro may fail to start with 'Failed to load Python DLL'. Install it manually: https://aka.ms/vs/17/release/vc_redist.x64.exe"
+    Write-Host "WARNING: Visual C++ Runtime not detected after install - RivetPanel may fail to start with 'Failed to load Python DLL'. Install it manually: https://aka.ms/vs/17/release/vc_redist.x64.exe"
 }
 
 Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
@@ -144,11 +144,11 @@ Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
 # Launch now for the active interactive session, if any (the installer's
 # /SUPPRESSMSGBOXES + silent flags skip the "launch now" prompt)
 try {
-    $exePath = "C:\Program Files\ITPanelPro\ITPanelPro.exe"
+    $exePath = "C:\Program Files\RivetPanel\RivetPanel.exe"
     $explorer = Get-Process -Name explorer -IncludeUserName -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($explorer -and (Test-Path $exePath)) {
         Start-Process -FilePath $exePath
-        Write-Host "Launched ITPanelPro.exe"
+        Write-Host "Launched RivetPanel.exe"
     } else {
         Write-Host "No interactive session detected; app will start on next login."
     }
@@ -160,4 +160,4 @@ if ($proc.ExitCode -ne 0) {
     throw "Installer failed with exit code $($proc.ExitCode)"
 }
 
-Write-Host "ITPanel Pro deployment complete."
+Write-Host "RivetPanel deployment complete."

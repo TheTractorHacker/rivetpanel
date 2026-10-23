@@ -1,9 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Build with: pyinstaller itpanel_pro.spec
+# Build with: pyinstaller rivetpanel.spec
 #
-# Produces ITPanelPro.app (a menu-bar-only "agent" app, no Dock icon).
-# config.json is NOT bundled — it is deployed separately to
-# /Library/Application Support/ITPanelPro/config.json (see install.sh).
+# Produces a single-file, windowed (no console) .exe. config.json is NOT
+# bundled — it is deployed separately to %ProgramData%\RivetPanel\.
 
 import os
 
@@ -14,8 +13,8 @@ a = Analysis(
     pathex=['../common'],
     binaries=[],
     datas=[
-        ('assets/icon.png', 'assets'),
-    ] if os.path.exists('assets/icon.png') else [],
+        ('assets/icon.ico', 'assets'),
+    ] if os.path.exists('assets/icon.ico') else [],
     hiddenimports=['PIL._tkinter_finder', 'cryptography.hazmat.bindings._rust'],
     hookspath=[],
     runtime_hooks=[],
@@ -32,7 +31,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='ITPanelPro',
+    name='RivetPanel',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -45,18 +44,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-)
-
-app = BUNDLE(
-    exe,
-    name='ITPanelPro.app',
-    icon=None,
-    bundle_identifier='com.foleyit.itpanelpro',
-    info_plist={
-        'CFBundleName': 'ITPanel Pro',
-        'CFBundleDisplayName': 'ITPanel Pro',
-        'CFBundleShortVersionString': '2.0.0',
-        'LSUIElement': True,  # menu-bar app, no Dock icon
-        'NSHighResolutionCapable': True,
-    },
+    icon='assets/icon.ico' if os.path.exists('assets/icon.ico') else None,
 )

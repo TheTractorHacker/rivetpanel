@@ -1,5 +1,5 @@
 """
-ITPanel Pro - shared core
+RivetPanel - shared core
 
 Platform-specific entry points (Windows/tray_app.py, Linux/tray_app.py,
 macOS/tray_app.py) import this module and call run_app() with a list of
@@ -42,9 +42,9 @@ from tkinter import filedialog, messagebox, ttk
 from psa import get_provider_class, get_provider_name
 from psa.base import ChatUnavailable
 
-APP_NAME = "ITPanel Pro"
+APP_NAME = "RivetPanel"
 VERSION = "2.1.10"
-GITHUB_REPO = "TheTractorHacker/itpanel-pro"
+GITHUB_REPO = "TheTractorHacker/rivetpanel"
 
 # Ed25519 public key for verifying release authenticity before the self-update
 # mechanism extracts/executes anything downloaded from a GitHub release. The
@@ -54,7 +54,7 @@ GITHUB_REPO = "TheTractorHacker/itpanel-pro"
 # shipping a new signed release under the OLD key first (so existing installs
 # can still verify and update), since an install can never trust an update
 # signed with a key it doesn't already have embedded.
-RELEASE_SIGNING_PUBLIC_KEY_B64 = "Eb+GNxWfSYRT0f2aaUd63RQBCrhpD36wdQnrgU1vWY8="
+RELEASE_SIGNING_PUBLIC_KEY_B64 = "/xTmtFmmSpU2/lQ0DW3MjIPQi5ja6hBtbY1ZlrvHLag="
 
 
 def _notify(icon, message: str, title: str = APP_NAME, chat: bool = False):
@@ -105,19 +105,19 @@ def app_dir():
 
 def app_folder_name():
     """PascalCase app folder name for Windows/macOS (ProgramData, Application
-    Support). Resolves to plain "ITPanelPro" for the itflow build so existing
+    Support). Resolves to plain "RivetPanel" for the rivet build so existing
     installs keep upgrading into the same paths with no migration; other
-    providers get a "ITPanelPro-<Provider>" folder so multiple provider
+    providers get a "RivetPanel-<Provider>" folder so multiple provider
     builds can coexist on one machine without colliding."""
     name = get_provider_name()
-    return "ITPanelPro" if name == "itflow" else f"ITPanelPro-{name.capitalize()}"
+    return "RivetPanel" if name == "rivet" else f"RivetPanel-{name.capitalize()}"
 
 
 def app_folder_slug():
     """kebab-case app folder name for Linux (/etc, XDG dirs). Same
-    itflow-stays-unqualified rule as app_folder_name()."""
+    rivet-stays-unqualified rule as app_folder_name()."""
     name = get_provider_name()
-    return "itpanel-pro" if name == "itflow" else f"itpanel-pro-{name}"
+    return "rivetpanel" if name == "rivet" else f"rivetpanel-{name}"
 
 
 def data_dir():
@@ -206,7 +206,7 @@ def setup_style(root, accent=None):
     """Configure a clean, modern ttk theme shared by every window.
 
     accent: optional hex color (e.g. "#16a34a") to override the default
-    ITFlow blue, for MSPs that want their own branding color.
+    RivetIT blue, for MSPs that want their own branding color.
     """
     accent_color = accent or ACCENT
     accent_dark = _darken(accent_color) if accent else ACCENT_DARK
@@ -629,7 +629,7 @@ def poll_ticket_chat(config, provider, icon):
 #
 # poll_ticket_chat() above is a 300s safety-net fallback. The listeners below
 # subscribe to a provider's live-push channel (provider.stream_chat(), e.g.
-# ITFlow's server-sent-events stream backed by Redis pub/sub - see
+# RivetIT's server-sent-events stream backed by Redis pub/sub - see
 # includes/sse_ticket_chat_stream.php) so new messages arrive within ~1-2
 # seconds instead of waiting for the next poll. Only invoked for providers
 # where provider.supports_stream_chat is True.
@@ -1542,7 +1542,7 @@ def run_app(config_paths, icon_path=None):
         # its original unqualified filenames for upgrade continuity with
         # installs from before multi-provider support existed.
         provider_name = get_provider_name()
-        if provider_name == "itflow":
+        if provider_name == "rivet":
             windows_suffix, macos_suffix, linux_suffix = "setup.exe", "-macos.zip", "-linux.tar.gz"
         else:
             windows_suffix = f"-{provider_name}-setup.exe"
@@ -1552,7 +1552,7 @@ def run_app(config_paths, icon_path=None):
         _notify(icon, f"Downloading v{tag} update...", title=APP_NAME)
 
         try:
-            tmp_dir = tempfile.mkdtemp(prefix="itpanelpro_update_")
+            tmp_dir = tempfile.mkdtemp(prefix="rivetpanel_update_")
 
             if system == "Windows":
                 asset = next((a for a in assets if a["name"].lower().endswith(windows_suffix)), None)
@@ -1567,7 +1567,7 @@ def run_app(config_paths, icon_path=None):
 
             elif system == "Darwin" and getattr(sys, "frozen", False):
                 # Derive the .app bundle path from the running executable:
-                # .app/Contents/MacOS/ITPanelPro  ->  up three levels  -> .app
+                # .app/Contents/MacOS/RivetPanel  ->  up three levels  -> .app
                 app_bundle = os.path.normpath(
                     os.path.join(os.path.dirname(sys.executable), "..", "..")
                 )
@@ -1582,9 +1582,9 @@ def run_app(config_paths, icon_path=None):
                     for name in z.namelist():
                         if ".." not in name and not name.startswith("/"):
                             z.extract(name, tmp_dir)
-                new_app = os.path.join(tmp_dir, "ITPanelPro.app")
+                new_app = os.path.join(tmp_dir, "RivetPanel.app")
                 if not os.path.isdir(new_app):
-                    raise RuntimeError("ITPanelPro.app not found in update package")
+                    raise RuntimeError("RivetPanel.app not found in update package")
 
                 # Detached script: waits for us to exit, replaces bundle, relaunches
                 updater = os.path.join(tmp_dir, "apply_update.sh")
@@ -1604,7 +1604,7 @@ open -a {shlex.quote(app_bundle)}
                 root.after(0, root.quit)
 
             elif system == "Linux" and getattr(sys, "frozen", False):
-                current_binary = sys.executable  # e.g. /opt/itpanel-pro/ITPanelPro
+                current_binary = sys.executable  # e.g. /opt/rivetpanel/RivetPanel
                 asset = next((a for a in assets if a["name"].lower().endswith(linux_suffix)), None)
                 if not asset:
                     root.after(0, lambda: messagebox.showerror(APP_NAME, "Linux update not found in release."))
@@ -1616,9 +1616,9 @@ open -a {shlex.quote(app_bundle)}
                     for member in t.getmembers():
                         if ".." not in member.name and not member.name.startswith("/"):
                             t.extract(member, tmp_dir)
-                new_binary = os.path.join(tmp_dir, "ITPanelPro")
+                new_binary = os.path.join(tmp_dir, "RivetPanel")
                 if not os.path.isfile(new_binary):
-                    raise RuntimeError("ITPanelPro binary not found in update package")
+                    raise RuntimeError("RivetPanel binary not found in update package")
                 os.chmod(new_binary, 0o755)
 
                 # Detached script: waits for our PID to exit, replaces binary, relaunches

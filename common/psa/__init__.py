@@ -1,11 +1,11 @@
 """
 Build-time PSA provider selection.
 
-Exactly one provider is compiled into each ITPanel Pro binary - there is no
+Exactly one provider is compiled into each RivetPanel binary - there is no
 runtime picker. CI writes psa/_selected.py (gitignored) via
 scripts/select_provider.py right before the PyInstaller build; PyInstaller's
 modulegraph then only bundles that one concrete provider module. Local/dev
-runs (no _selected.py present) default to ITFlow.
+runs (no _selected.py present) default to RivetIT/RivetMSP.
 """
 
 
@@ -14,8 +14,8 @@ def get_provider_class():
         from . import _selected
         return _selected.PROVIDER_CLASS
     except ImportError:
-        from .itflow import ItflowProvider
-        return ItflowProvider
+        from .rivet import RivetProvider
+        return RivetProvider
 
 
 def get_provider_name():
@@ -23,4 +23,4 @@ def get_provider_name():
         from . import _selected
         return _selected.PROVIDER_NAME
     except ImportError:
-        return "itflow"
+        return "rivet"

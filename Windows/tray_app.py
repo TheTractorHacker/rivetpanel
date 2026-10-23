@@ -1,11 +1,11 @@
 """
-ITPanel Pro - Windows tray app
+RivetPanel - Windows tray app
 
-Lets end users submit an ITFlow support ticket (with an optional full-screen
+Lets end users submit an RivetIT/RivetMSP support ticket (with an optional full-screen
 screenshot) in a few clicks, without logging in to the client portal.
 
 Configuration is read from (in order of preference):
-  1. %ProgramData%\\ITPanelPro\\config.json
+  1. %ProgramData%\\RivetPanel\\config.json
   2. config.json next to this script / the packaged .exe
 
 See config.json for the expected fields. Shared UI/logic lives in

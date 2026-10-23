@@ -1,5 +1,5 @@
 {
-    "itflow_base_url": "https://itflow.example.com",
+    "rivet_base_url": "https://psa.example.com",
     "api_key": "PASTE-API-KEY-HERE",
     "client_id": 1,
     "contact_id": null,

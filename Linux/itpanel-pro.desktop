@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=ITPanel Pro
-Comment=Submit an ITFlow support ticket with an optional screenshot
-Exec=/opt/itpanel-pro/ITPanelPro
-Icon=/opt/itpanel-pro/assets/icon.png
-Terminal=false
-Categories=Utility;
-X-GNOME-Autostart-enabled=true

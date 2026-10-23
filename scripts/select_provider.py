@@ -3,7 +3,7 @@
 Write common/psa/_selected.py so a PyInstaller build bundles exactly one
 PSA provider. Run once per CI build job, before `pyinstaller`:
 
-    python scripts/select_provider.py itflow
+    python scripts/select_provider.py rivet
 
 Add new providers to PROVIDERS as they're implemented (see the plan's
 phased rollout: syncro/atera in Phase 1, ninjaone/halopsa in Phase 2).
@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 PROVIDERS = {
-    "itflow": ("itflow", "ItflowProvider"),
+    "rivet": ("rivet", "RivetProvider"),
 }
 
 TEMPLATE = """\

@@ -1,25 +1,25 @@
-; ITPanel Pro - Inno Setup installer
+; RivetPanel - Inno Setup installer
 ;
 ; Installs the tray app and prompts for per-install configuration
-; (ITFlow base URL, API key, client ID, contact ID, priority), writing
-; the result to %ProgramData%\ITPanelPro\config.json.
+; (RivetIT/RivetMSP base URL, API key, client ID, contact ID, priority), writing
+; the result to %ProgramData%\RivetPanel\config.json.
 ;
 ; If an older "ITFlow Quick Ticket" install is detected (old AppId), it is
 ; silently uninstalled first and its config.json is migrated so existing
-; deployments upgrade cleanly to ITPanel Pro.
+; deployments upgrade cleanly to RivetPanel.
 ;
-; Build:  ISCC.exe ITPanelPro.iss
-; Output: installer\Output\ITPanelProSetup.exe
+; Build:  ISCC.exe RivetPanel.iss
+; Output: installer\Output\RivetPanelSetup.exe
 ;
 ; Supports unattended installs, e.g.:
-;   ITPanelProSetup.exe /VERYSILENT /SUPPRESSMSGBOXES ^
-;     /ItflowBaseUrl=https://itflow.foleyit.com ^
+;   RivetPanelSetup.exe /VERYSILENT /SUPPRESSMSGBOXES ^
+;     /RivetBaseUrl=https://psa.example.com ^
 ;     /ApiKey=XXXXXXXX /ClientId=5 /ContactId=12 /Priority=Medium
 
-#define MyAppName "ITPanel Pro"
+#define MyAppName "RivetPanel"
 #define MyAppVersion "2.1.10"
 #define MyAppPublisher "Foley IT"
-#define MyAppExeName "ITPanelPro.exe"
+#define MyAppExeName "RivetPanel.exe"
 #define OldAppId "{B7B6A6E1-6E0C-4C2D-9F2F-7C1D4A9E3B21}"
 
 [Setup]
@@ -27,18 +27,18 @@ AppId={{9EAF8FE4-782D-48E8-BFC8-51D9F008F82E}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\ITPanelPro
+DefaultDirName={autopf}\RivetPanel
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=Output
-OutputBaseFilename=ITPanelProSetup
+OutputBaseFilename=RivetPanelSetup
 Compression=lzma
 SolidCompression=yes
 SetupIconFile=..\Windows\assets\icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 PrivilegesRequired=admin
-; The bundled ITPanelPro.exe is a 64-bit PyInstaller build (see
-; Windows/itpanel_pro.spec) - it can't run on 32-bit Windows at all.
+; The bundled RivetPanel.exe is a 64-bit PyInstaller build (see
+; Windows/rivetpanel.spec) - it can't run on 32-bit Windows at all.
 ; Without ArchitecturesAllowed, the installer would happily install there
 ; anyway (ArchitecturesInstallIn64BitMode only affects *how* it installs on
 ; a 64-bit machine) and leave behind an exe that can never launch. Refuse
@@ -58,7 +58,7 @@ RestartApplications=yes
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "..\Windows\dist\ITPanelPro.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\Windows\dist\RivetPanel.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; Start on login for all users
@@ -234,7 +234,7 @@ begin
 end;
 
 // Silently uninstalls a previous "ITFlow Quick Ticket" install (old AppId)
-// if one is found, so upgrades to ITPanel Pro don't leave a stale install
+// if one is found, so upgrades to RivetPanel don't leave a stale install
 // or duplicate startup entry behind.
 procedure UninstallOldVersion;
 var
@@ -289,7 +289,7 @@ end;
 // True if InstallVCRedistIfNeeded ran and the runtime still isn't present
 // afterward (download failed, e.g. no internet / URL blocked by a
 // firewall, or the silent redist install itself failed) - checked at
-// ssDone to warn the user instead of failing silently, since ITPanel Pro
+// ssDone to warn the user instead of failing silently, since RivetPanel
 // will hit the same "Failed to load Python DLL" error this was meant to
 // prevent.
 var
@@ -306,7 +306,7 @@ begin
   if VCRedistInstalled() then
     exit;
 
-  SetInstallStatus('Downloading the Visual C++ Runtime (needed to run ITPanel Pro)...');
+  SetInstallStatus('Downloading the Visual C++ Runtime (needed to run RivetPanel)...');
   TmpPath := ExpandConstant('{tmp}\vc_redist.x64.exe');
   DownloadCmd := '-NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri ''https://aka.ms/vs/17/release/vc_redist.x64.exe'' -OutFile ''' + TmpPath + ''' -UseBasicParsing } catch {}"';
 
@@ -338,7 +338,7 @@ begin
 
   if (BaseUrl = '') or (BaseUrl = 'https://') or (ApiKey = '') then
   begin
-    PickerStatusLabel.Caption := 'Enter the ITFlow Base URL and API Key on the previous page first.';
+    PickerStatusLabel.Caption := 'Enter the RivetIT/RivetMSP Base URL and API Key on the previous page first.';
     exit;
   end;
   if Term = '' then
@@ -476,7 +476,7 @@ procedure CreatePickerPage;
 begin
   PickerPage := CreateCustomPage(ConfigPage.ID,
     'Find Client / Contact (optional)',
-    'Search ITFlow by name instead of typing numeric IDs - useful when deploying to lots of ' +
+    'Search RivetIT/RivetMSP by name instead of typing numeric IDs - useful when deploying to lots of ' +
     'clients by hand. Skip this page to keep whatever you entered on the previous page.');
 
   ClientResultIds := TStringList.Create;
@@ -559,7 +559,7 @@ var
   ConfigPath, OldConfigPath, ExistingJson: String;
   ExistingJsonA: AnsiString;
 begin
-  ConfigPath := ExpandConstant('{commonappdata}\ITPanelPro\config.json');
+  ConfigPath := ExpandConstant('{commonappdata}\RivetPanel\config.json');
   OldConfigPath := ExpandConstant('{commonappdata}\ITFlowQuickTicket\config.json');
   ExistingJson := '';
   if FileExists(ConfigPath) then
@@ -575,18 +575,18 @@ begin
   end;
 
   ConfigPage := CreateInputQueryPage(wpSelectDir,
-    'ITFlow Connection Settings',
-    'Configure this install to talk to your ITFlow instance',
-    'API key: Admin > API Keys. Client ID: on the client''s page in ITFlow, or leave blank and ' +
+    'RivetIT/RivetMSP Connection Settings',
+    'Configure this install to talk to your RivetIT/RivetMSP instance',
+    'API key: Admin > API Keys. Client ID: on the client''s page in RivetIT/RivetMSP, or leave blank and ' +
     'search for it on the next page. Existing settings are pre-filled and kept on upgrades unless changed.');
 
-  ConfigPage.Add('ITFlow Base URL (e.g. https://itflow.example.com):', False);
+  ConfigPage.Add('RivetIT/RivetMSP Base URL (e.g. https://itflow.example.com):', False);
   ConfigPage.Add('API Key:', False);
   ConfigPage.Add('Client ID:', False);
   ConfigPage.Add('Contact ID (optional):', False);
   ConfigPage.Add('Priority (Low / Medium / High / Critical):', False);
 
-  ConfigPage.Values[0] := ConfigDefault('ItflowBaseUrl', 'itflow_base_url', ExistingJson, 'https://');
+  ConfigPage.Values[0] := ConfigDefault('RivetBaseUrl', 'rivet_base_url', ExistingJson, 'https://');
   ConfigPage.Values[1] := ConfigDefault('ApiKey', 'api_key', ExistingJson, '');
   ConfigPage.Values[2] := ConfigDefault('ClientId', 'client_id', ExistingJson, '');
   ConfigPage.Values[3] := ConfigDefault('ContactId', 'contact_id', ExistingJson, '');
@@ -603,7 +603,7 @@ begin
   begin
     if (Trim(ConfigPage.Values[0]) = '') or (Trim(ConfigPage.Values[0]) = 'https://') then
     begin
-      MsgBox('Please enter the ITFlow base URL.', mbError, MB_OK);
+      MsgBox('Please enter the RivetIT/RivetMSP base URL.', mbError, MB_OK);
       Result := False;
       exit;
     end;
@@ -683,14 +683,14 @@ begin
     ContactJson := ContactId;
 
   Json := '{' + #13#10 +
-    '    "itflow_base_url": "' + JsonEscape(BaseUrl) + '",' + #13#10 +
+    '    "rivet_base_url": "' + JsonEscape(BaseUrl) + '",' + #13#10 +
     '    "api_key": "' + JsonEscape(ApiKey) + '",' + #13#10 +
     '    "client_id": ' + ClientId + ',' + #13#10 +
     '    "contact_id": ' + ContactJson + ',' + #13#10 +
     '    "priority": "' + JsonEscape(Priority) + '"' + #13#10 +
     '}' + #13#10;
 
-  ConfigDir := ExpandConstant('{commonappdata}\ITPanelPro');
+  ConfigDir := ExpandConstant('{commonappdata}\RivetPanel');
   ConfigPath := ConfigDir + '\config.json';
 
   if not DirExists(ConfigDir) then
@@ -700,7 +700,7 @@ begin
 
   // Lock down write access to Administrators/SYSTEM only, so a non-admin
   // local user can't tamper with config.json to redirect the app at an
-  // attacker-controlled server (e.g. rewriting itflow_base_url). Read access
+  // attacker-controlled server (e.g. rewriting rivet_base_url). Read access
   // is intentionally kept for Authenticated Users: the app runs as whichever
   // user is interactively logged in (a Startup-folder shortcut, not a
   // service), not as an admin, so restricting read here would just break it
@@ -726,23 +726,23 @@ begin
   begin
     // If this installer was downloaded by the tray app's self-update (see
     // do_self_update in common/core.py), it lives in its own temp folder
-    // named "itpanelpro_update_*". Clean that folder up now that the
+    // named "rivetpanel_update_*". Clean that folder up now that the
     // install is done, after a short delay so this exe can be removed.
     SrcDir := ExtractFileDir(ExpandConstant('{srcexe}'));
-    if Pos('itpanelpro_update_', Lowercase(ExtractFileName(SrcDir))) = 1 then
+    if Pos('rivetpanel_update_', Lowercase(ExtractFileName(SrcDir))) = 1 then
       Exec(ExpandConstant('{cmd}'), '/C ping -n 3 127.0.0.1 >nul & rmdir /s /q "' + SrcDir + '"',
         '', SW_HIDE, ewNoWait, ResultCode);
 
     // Warn rather than fail silently if we couldn't get the VC++ Runtime
     // installed (e.g. no internet access, or the URL is blocked by a
-    // firewall) - otherwise ITPanel Pro will hit exactly the
+    // firewall) - otherwise RivetPanel will hit exactly the
     // "Failed to load Python DLL" error this was meant to prevent, with no
     // clue why. MsgBox is auto-answered (not actually shown) under
     // /SUPPRESSMSGBOXES, so this only surfaces during an interactive run;
     // unattended/RMM deploys get the equivalent check in
-    // deploy_itpanelpro.ps1 after the install instead.
+    // deploy_rivetpanel.ps1 after the install instead.
     if VCRedistStillMissing then
-      MsgBox('ITPanel Pro installed, but the Visual C++ Runtime it needs could not be ' +
+      MsgBox('RivetPanel installed, but the Visual C++ Runtime it needs could not be ' +
         'downloaded or installed automatically (no internet access, or the download URL ' +
         'is blocked). If the app fails to start, install it manually from ' +
         'https://aka.ms/vs/17/release/vc_redist.x64.exe and try again.',

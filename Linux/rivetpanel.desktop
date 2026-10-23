@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=RivetPanel
+Comment=Submit an RivetIT/RivetMSP support ticket with an optional screenshot
+Exec=/opt/rivetpanel/RivetPanel
+Icon=/opt/rivetpanel/assets/icon.png
+Terminal=false
+Categories=Utility;
+X-GNOME-Autostart-enabled=true

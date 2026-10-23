@@ -3,10 +3,10 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.foleyit.itpanelpro</string>
+    <string>com.foleyit.rivetpanel</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Applications/ITPanelPro.app/Contents/MacOS/ITPanelPro</string>
+        <string>/Applications/RivetPanel.app/Contents/MacOS/RivetPanel</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

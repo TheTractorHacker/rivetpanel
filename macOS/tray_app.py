@@ -1,13 +1,13 @@
 """
-ITPanel Pro - macOS menu bar app
+RivetPanel - macOS menu bar app
 
-Lets end users submit an ITFlow support ticket (with an optional full-screen
+Lets end users submit an RivetIT/RivetMSP support ticket (with an optional full-screen
 screenshot) in a few clicks, without logging in to the client portal.
 
 Configuration is read from (in order of preference):
-  1. /Library/Application Support/ITPanelPro/config.json
+  1. /Library/Application Support/RivetPanel/config.json
      (system-wide, set by install.sh / RMM)
-  2. ~/Library/Application Support/ITPanelPro/config.json
+  2. ~/Library/Application Support/RivetPanel/config.json
   3. config.json next to this script / inside the .app bundle
 
 See config.json for the expected fields. Shared UI/logic lives in

@@ -1,7 +1,7 @@
 """
-ITFlow PSA provider.
+RivetIT/RivetMSP PSA provider.
 
-Talks to ITFlow's REST API (/api/v1/...). This is a behavior-preserving
+Talks to RivetIT/RivetMSP's REST API (/api/v1/...). This is a behavior-preserving
 extraction of what used to live inline in common/core.py - see git history
 on core.py prior to the psa/ refactor for the original call sites.
 """
@@ -15,17 +15,17 @@ import requests
 from .base import Category, ChatMessage, ChatUnavailable, PSAProvider, Ticket
 
 
-class ItflowProvider(PSAProvider):
-    name = "itflow"
+class RivetProvider(PSAProvider):
+    name = "rivet"
     supports_chat = True
     supports_stream_chat = True
     supports_categories = True
 
     def _base_url(self):
-        return self.config["itflow_base_url"].rstrip("/")
+        return (self.config.get("rivet_base_url") or self.config["itflow_base_url"]).rstrip("/")
 
     def _headers(self):
-        """Auth header for ITFlow API requests.
+        """Auth header for RivetIT/RivetMSP API requests.
 
         Passes the api_key in a header rather than a URL query parameter
         so it is never written to web server access logs.

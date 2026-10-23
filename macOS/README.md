@@ -1,12 +1,12 @@
-# ITPanel Pro (macOS)
+# RivetPanel (macOS)
 
 A menu bar app for macOS, equivalent to the [Windows tray app](../Windows),
-letting end users submit an ITFlow support ticket — with an optional
+letting end users submit an RivetIT/RivetMSP support ticket — with an optional
 screenshot — directly from the menu bar.
 
 ## Requirements
 
-Requires **[ITFlow MSP — From TheTractorHacker](https://github.com/TheTractorHacker/itflow) v2.11.32 or later**
+Requires **[RivetIT or RivetMSP](https://github.com/TheTractorHacker/RivetIT) v2.11.32 or later**
 (multipart attachment support on `POST /api/v1/tickets`).
 
 Screenshot capture uses Pillow's `ImageGrab.grab()`, which on macOS shells
@@ -15,11 +15,11 @@ out to the built-in `screencapture` tool (no extra install needed).
 ## Repo layout
 
 - `tray_app.py` — entry point; shared UI/logic lives in `../common/core.py`
-- `itpanel_pro.spec` — PyInstaller spec, produces
-  `ITPanelPro.app`
-- `com.foleyit.itpanelpro.plist` — LaunchAgent for autostart
+- `rivetpanel.spec` — PyInstaller spec, produces
+  `RivetPanel.app`
+- `com.foleyit.rivetpanel.plist` — LaunchAgent for autostart
 - `install.sh` — installs the app to `/Applications`, writes
-  `/Library/Application Support/ITPanelPro/config.json`, and
+  `/Library/Application Support/RivetPanel/config.json`, and
   registers the LaunchAgent
 - `assets/` — branded icon
 
@@ -28,7 +28,7 @@ out to the built-in `screencapture` tool (no extra install needed).
 ### Option A: GitHub Actions
 
 Push a tag like `v1.3.0` (or run the workflow manually) and GitHub Actions
-builds on `macos-latest`, producing `ITPanelPro.app` (zipped) and
+builds on `macos-latest`, producing `RivetPanel.app` (zipped) and
 attaching it to the GitHub release.
 
 ### Option B: Build locally on macOS
@@ -38,18 +38,18 @@ cd macOS
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-pyinstaller itpanel_pro.spec
-# app at dist/ITPanelPro.app
+pyinstaller rivetpanel.spec
+# app at dist/RivetPanel.app
 ```
 
 ## Installing
 
 ```bash
-sudo ./install.sh https://itflow.foleyit.com <API_KEY> <CLIENT_ID> [CONTACT_ID] [PRIORITY]
+sudo ./install.sh https://psa.example.com <API_KEY> <CLIENT_ID> [CONTACT_ID] [PRIORITY]
 ```
 
-This installs `ITPanelPro.app` to `/Applications`, writes
-`/Library/Application Support/ITPanelPro/config.json`, and registers
+This installs `RivetPanel.app` to `/Applications`, writes
+`/Library/Application Support/RivetPanel/config.json`, and registers
 a LaunchAgent so the app appears in the menu bar for every user on login.
 
 ### Upgrading
@@ -64,21 +64,21 @@ Since this build isn't notarized/signed, first launch may require
 right-click > Open, or running:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/ITPanelPro.app
+xattr -dr com.apple.quarantine /Applications/RivetPanel.app
 ```
 
 ## Config reference (`config.json`)
 
 Same fields as the [Windows app](../Windows/README.md#config-reference-configjson):
-`itflow_base_url`, `api_key`, `client_id`, `contact_id` (optional, or
+`rivet_base_url`, `api_key`, `client_id`, `contact_id` (optional, or
 `null`), `priority`, plus the optional `include_system_info`,
 `check_for_updates`, `accent_color`, and `branding_logo` fields.
 
 Config is read from, in order:
 
-1. `/Library/Application Support/ITPanelPro/config.json` (system-wide,
+1. `/Library/Application Support/RivetPanel/config.json` (system-wide,
    written by `install.sh`)
-2. `~/Library/Application Support/ITPanelPro/config.json` (per-user
+2. `~/Library/Application Support/RivetPanel/config.json` (per-user
    override)
 3. `config.json` next to the app bundle
 

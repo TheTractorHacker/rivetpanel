@@ -1,6 +1,6 @@
-# ITPanel Pro (Windows)
+# RivetPanel (Windows)
 
-A lightweight Windows tray app that lets end users submit an ITFlow support
+A lightweight Windows tray app that lets end users submit an RivetIT/RivetMSP support
 ticket — with an optional full-screen screenshot — in a few clicks, with no
 portal login.
 
@@ -12,13 +12,13 @@ portal login.
    - Description
    - "Attach Screenshot" (captures the full screen, shows a thumbnail,
      can be retaken or removed)
-3. "Submit" posts the ticket to ITFlow via the API, then the window closes
+3. "Submit" posts the ticket to RivetIT/RivetMSP via the API, then the window closes
    after a brief success message.
 
-## ITFlow API call
+## RivetIT/RivetMSP API call
 
 ```
-POST {itflow_base_url}/api/v1/tickets?api_key={api_key}
+POST {rivet_base_url}/api/v1/tickets?api_key={api_key}
 Content-Type: multipart/form-data
 
 subject=...
@@ -29,17 +29,17 @@ priority=Medium
 file=@screenshot.png (optional)
 ```
 
-This requires ITFlow **v2.11.32 or later**, which added multipart/form-data
+This requires RivetIT/RivetMSP **v2.11.32 or later**, which added multipart/form-data
 support (with an optional `file`/`files[]` attachment) to ticket creation —
 see `agent` repo commit "API: support file attachments on ticket creation,
 replies, and unify attachment storage". On older versions, ticket creation
 only accepts a JSON body and has no attachment support.
 
-The `api_key` is a **legacy API key** (Admin > API Keys in ITFlow). Note:
+The `api_key` is a **legacy API key** (Admin > API Keys in RivetIT/RivetMSP). Note:
 
 - It must be sent as a `?api_key=` query string parameter — for
   multipart/form-data POST bodies, the JSON-body fallback does not apply.
-- The legacy key authenticates as the first active admin user (ITFlow does
+- The legacy key authenticates as the first active admin user (RivetIT/RivetMSP does
   not currently scope legacy-key requests to `api_key_client_id`); the
   `client_id` field in `config.json` is what actually assigns the ticket
   to the right client.
@@ -50,14 +50,14 @@ The `api_key` is a **legacy API key** (Admin > API Keys in ITFlow). Note:
 
 - `tray_app.py` — the application (pystray + tkinter + Pillow + requests)
 - `config.json` — config template, deployed to
-  `%ProgramData%\ITPanelPro\config.json`
-- `itpanel_pro.spec` — PyInstaller spec, produces a single
+  `%ProgramData%\RivetPanel\config.json`
+- `rivetpanel.spec` — PyInstaller spec, produces a single
   windowed `.exe` (no console)
 - `requirements.txt` — Python dependencies
-- `deploy/deploy_itpanelpro.ps1` — TacticalRMM deployment script (silently
+- `deploy/deploy_rivetpanel.ps1` — TacticalRMM deployment script (silently
   runs the installer with per-client config)
 - `assets/icon.ico` — branded tray/installer icon
-- `../installer/ITPanelPro.iss` — Inno Setup script that builds the
+- `../installer/RivetPanel.iss` — Inno Setup script that builds the
   configurable installer
 - `../.github/workflows/build.yml` — CI: builds the exe + installer on
   every push, and attaches both to a GitHub release for tags `v*`
@@ -70,8 +70,8 @@ Push a tag like `v1.0.0` (or just push to `master` / run the workflow
 manually) and GitHub Actions will build on a `windows-latest` runner and
 upload:
 
-- `ITPanelPro.exe` — the bare tray app
-- `ITPanelProSetup.exe` — the full installer (recommended)
+- `RivetPanel.exe` — the bare tray app
+- `RivetPanelSetup.exe` — the full installer (recommended)
 
 For tag pushes (`v*`), both files are also attached to a GitHub release.
 
@@ -80,25 +80,25 @@ For tag pushes (`v*`), both files are also attached to a GitHub release.
 ```powershell
 cd Windows
 pip install -r requirements.txt
-pyinstaller itpanel_pro.spec
-# Output: Windows\dist\ITPanelPro.exe
+pyinstaller rivetpanel.spec
+# Output: Windows\dist\RivetPanel.exe
 
 # Then build the installer (requires Inno Setup 6: https://jrsoftware.org/isdl.php)
 cd ..\installer
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ITPanelPro.iss
-# Output: installer\Output\ITPanelProSetup.exe
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" RivetPanel.iss
+# Output: installer\Output\RivetPanelSetup.exe
 ```
 
 To rebrand the tray icon, replace `Windows/assets/icon.ico` (also used as
 the installer icon) before building.
 
-## Installer (`ITPanelProSetup.exe`)
+## Installer (`RivetPanelSetup.exe`)
 
-Running the installer prompts for the ITFlow connection settings (base URL,
+Running the installer prompts for the RivetIT/RivetMSP connection settings (base URL,
 API key, Client ID, Contact ID, Priority) on a dedicated wizard page, then:
 
-- Installs `ITPanelPro.exe` to `C:\Program Files\ITPanelPro`
-- Writes `C:\ProgramData\ITPanelPro\config.json` from the entered
+- Installs `RivetPanel.exe` to `C:\Program Files\RivetPanel`
+- Writes `C:\ProgramData\RivetPanel\config.json` from the entered
   values
 - Adds a shortcut to the All Users Startup folder so it launches on every
   login
@@ -110,8 +110,8 @@ All wizard fields can be supplied as command-line parameters, which also
 pre-fill the wizard if shown:
 
 ```
-ITPanelProSetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
-  /ItflowBaseUrl=https://itflow.foleyit.com ^
+RivetPanelSetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
+  /RivetBaseUrl=https://psa.example.com ^
   /ApiKey=XXXXXXXXXXXXXXXX ^
   /ClientId=5 ^
   /ContactId=12 ^
@@ -120,29 +120,29 @@ ITPanelProSetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
 
 ## Deploying via TacticalRMM
 
-1. Get `ITPanelProSetup.exe` from a GitHub release (Option A above)
+1. Get `RivetPanelSetup.exe` from a GitHub release (Option A above)
    and host it somewhere TacticalRMM can download it from — the direct
    release asset URL works fine, e.g.:
 
    ```
-   https://github.com/TheTractorHacker/itpanel-pro/releases/latest/download/ITPanelProSetup.exe
+   https://github.com/TheTractorHacker/rivetpanel/releases/latest/download/RivetPanelSetup.exe
    ```
 
-2. In TacticalRMM, add `deploy/deploy_itpanelpro.ps1` as a script (type
+2. In TacticalRMM, add `deploy/deploy_rivetpanel.ps1` as a script (type
    **PowerShell**, run as **System**), then set its **Script Arguments**
    to a single line per client, e.g.:
 
    ```
-   -InstallerUrl "https://github.com/TheTractorHacker/itpanel-pro/releases/latest/download/ITPanelProSetup.exe" -ItflowBaseUrl "https://itflow.foleyit.com" -ApiKey "XXXXXXXXXXXXXXXX" -ClientId 5 -ContactId 12 -Priority "Medium"
+   -InstallerUrl "https://github.com/TheTractorHacker/rivetpanel/releases/latest/download/RivetPanelSetup.exe" -RivetBaseUrl "https://psa.example.com" -ApiKey "XXXXXXXXXXXXXXXX" -ClientId 5 -ContactId 12 -Priority "Medium"
    ```
 
    | Argument | Value |
    |----------|-------|
-   | `-InstallerUrl`  | URL to `ITPanelProSetup.exe` (above) |
-   | `-ItflowBaseUrl` | e.g. `https://itflow.foleyit.com` |
+   | `-InstallerUrl`  | URL to `RivetPanelSetup.exe` (above) |
+   | `-RivetBaseUrl` | e.g. `https://psa.example.com` |
    | `-ApiKey`        | API key from Admin > API Keys |
-   | `-ClientId`      | ITFlow `client_id` for this client |
-   | `-ContactId`     | (optional) ITFlow `contact_id`, omit or use `0` |
+   | `-ClientId`      | RivetIT/RivetMSP `client_id` for this client |
+   | `-ContactId`     | (optional) RivetIT/RivetMSP `contact_id`, omit or use `0` |
    | `-Priority`      | (optional) `Low` / `Medium` / `High` / `Critical`, default `Medium` |
 
    This downloads and silently runs the installer with those settings,
@@ -158,14 +158,14 @@ step needed. If you don't pass connection settings on an upgrade run, the
 existing `config.json` values are kept automatically.
 
 Machines still running the old **ITFlow Quick Ticket** are also upgraded
-cleanly: `ITPanelProSetup.exe` detects the previous install, silently
+cleanly: `RivetPanelSetup.exe` detects the previous install, silently
 uninstalls it, and migrates its `config.json` to the new
-`%ProgramData%\ITPanelPro\` location.
+`%ProgramData%\RivetPanel\` location.
 
 ### Self-update
 
 The tray app's "Check for Updates" menu item checks the GitHub releases feed
-and, if a newer version is available, offers to download `ITPanelProSetup.exe`
+and, if a newer version is available, offers to download `RivetPanelSetup.exe`
 and run it silently — the running app is closed and restarted automatically
 once the update finishes, with no manual download/rerun needed.
 
@@ -173,15 +173,15 @@ once the update finishes, with no manual download/rerun needed.
 
 | Field                  | Required | Description                                  |
 |------------------------|----------|-----------------------------------------------|
-| `itflow_base_url`      | yes      | e.g. `https://itflow.foleyit.com`              |
+| `rivet_base_url`      | yes      | e.g. `https://psa.example.com`              |
 | `api_key`               | yes      | Legacy API key from Admin > API Keys           |
-| `client_id`             | yes      | ITFlow `client_id` this install belongs to     |
-| `contact_id`            | no       | ITFlow `contact_id` to attach to the ticket    |
+| `client_id`             | yes      | RivetIT/RivetMSP `client_id` this install belongs to     |
+| `contact_id`            | no       | RivetIT/RivetMSP `contact_id` to attach to the ticket    |
 | `priority`              | no       | `Low` / `Medium` / `High` / `Critical` (default `Medium`) |
 | `include_system_info`   | no       | Auto-attach hostname/OS/user/local IP to ticket details (default `true`) |
 | `check_for_updates`     | no       | Silently check GitHub for newer releases on startup (default `true`) |
 | `accent_color`          | no       | Hex color (e.g. `"#16a34a"`) to re-brand the accent color used in the New Ticket window |
-| `branding_logo`         | no       | Absolute path to a `.png` to use as the tray icon and window header logo instead of the default ITFlow icon |
+| `branding_logo`         | no       | Absolute path to a `.png` to use as the tray icon and window header logo instead of the default RivetIT/RivetMSP icon |
 
 The installer only prompts for the first five fields above; the branding
 fields are optional and can be added by hand-editing `config.json` after
@@ -189,16 +189,16 @@ install (or templating it in your own deployment scripts).
 
 ### Other new features (v1.4.0+)
 
-- **Open Client Portal** — tray menu item that opens the ITFlow client
-  portal (`{itflow_base_url}/client/`) in the default browser.
+- **Open Client Portal** — tray menu item that opens the RivetIT/RivetMSP client
+  portal (`{rivet_base_url}/client/`) in the default browser.
 - **Asset auto-link** — the hostname of the machine is sent with every
-  ticket and matched against the client's Assets in ITFlow (by Asset Name
+  ticket and matched against the client's Assets in RivetIT/RivetMSP (by Asset Name
   or Asset Tag) to set the ticket's linked asset automatically.
-- **Ticket categories** — if the ITFlow instance has Ticket-type categories
+- **Ticket categories** — if the RivetIT/RivetMSP instance has Ticket-type categories
   configured, a Category dropdown appears in the New Ticket window.
 - **File attachments** — in addition to the screenshot tool, users can
   attach any file (log, error dialog export, etc.) via "Attach File".
-- **Offline queue** — if the ITFlow server is unreachable when a ticket is
+- **Offline queue** — if the RivetIT/RivetMSP server is unreachable when a ticket is
   submitted, it's saved locally and retried automatically every 5 minutes.
 - **My Recent Tickets** — tray menu item showing this install's recent
   tickets and their current status.
