@@ -1,6 +1,6 @@
 pystray
 pyobjc-framework-Cocoa
-Pillow
-requests
-pyinstaller
-cryptography
+Pillow>=13.0.0
+requests>=2.34.2
+pyinstaller>=6.22.3
+cryptography>=50.0.2

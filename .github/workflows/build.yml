@@ -7,10 +7,28 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb python3-tk
+          pip install -r Linux/requirements.txt
+      - name: Tests
+        run: |
+          python tests/test_provider.py
+          xvfb-run -a python tests/test_security.py
+
   build-windows:
+    permissions:
+      contents: write
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,6 +80,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-linux:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -112,6 +132,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-macos:
+    permissions:
+      contents: write
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -164,6 +186,8 @@ jobs:
   # before tagging a release, or do_self_update() will refuse to install it
   # (fail closed - missing checksums.txt/.sig aborts the update).
   sign-release:
+    permissions:
+      contents: write
     needs: [build-windows, build-linux, build-macos]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -175,7 +199,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install signing dependency
-        run: pip install cryptography
+        run: pip install "cryptography>=50.0.2"
 
       - name: Download all platform artifacts
         uses: actions/download-artifact@v4

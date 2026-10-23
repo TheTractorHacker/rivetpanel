@@ -1,6 +1,6 @@
 pystray==0.19.5
-Pillow==10.4.0
-requests==2.32.3
-pyinstaller==6.10.0
+Pillow==13.0.0
+requests==2.34.2
+pyinstaller==6.22.3
 winotify==1.1.0
-cryptography==43.0.1
+cryptography==50.0.2

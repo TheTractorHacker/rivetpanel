@@ -151,7 +151,7 @@ def load_config(extra_paths):
 
 def build_tray_icon_image(icon_path, branding_logo=None):
     """Load the branding logo or bundled tray icon, or fall back to a drawn one."""
-    candidate = branding_logo or icon_path
+    candidate = safe_image_path(branding_logo) or icon_path
     if candidate and os.path.isfile(candidate):
         return Image.open(candidate)
 
@@ -777,6 +777,78 @@ def _ensure_chat_listeners():
 
 # ── Update check ─────────────────────────────────────────────────────────
 
+# ── Hardening helpers ─────────────────────────────────────────────────────
+
+from urllib.parse import urljoin, urlparse
+
+RELEASE_HOSTS = {
+    "github.com", "api.github.com", "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
+}
+MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+MAX_UPDATE_REDIRECTS = 5
+
+
+def is_trusted_release_url(url, first_hop=True):
+    """Only https URLs on GitHub's release hosts; the first hop must also be
+    this repo's own release download path. Update URLs come from a JSON
+    response, so they are never fetched unchecked."""
+    try:
+        u = urlparse(url)
+    except ValueError:
+        return False
+    if u.scheme != "https" or u.hostname not in RELEASE_HOSTS or u.username or u.password:
+        return False
+    if first_hop and u.hostname == "github.com":
+        return u.path.startswith(f"/{GITHUB_REPO}/releases/download/")
+    return True
+
+
+def fetch_release_url(url, **kwargs):
+    """requests.get that follows redirects manually, re-validating each hop."""
+    for hop in range(MAX_UPDATE_REDIRECTS + 1):
+        if not is_trusted_release_url(url, first_hop=(hop == 0)):
+            raise ReleaseVerificationError(f"Refusing to download from untrusted URL: {url}")
+        resp = requests.get(url, allow_redirects=False, **kwargs)
+        if resp.is_redirect and resp.headers.get("Location"):
+            url = urljoin(url, resp.headers["Location"])
+            resp.close()
+            continue
+        return resp
+    raise ReleaseVerificationError("Too many redirects while downloading update.")
+
+
+def read_attachment(path, protected_paths=()):
+    """Read a user-chosen attachment safely: a regular file (no devices/FIFOs),
+    capped size, and never the app's own config or data (which hold the API
+    key). Returns bytes; raises ValueError with a user-presentable message."""
+    real = os.path.realpath(path)
+    if not os.path.isfile(real):
+        raise ValueError("The attachment is not a regular file.")
+    for prot in protected_paths:
+        if not prot:
+            continue
+        prot_real = os.path.realpath(prot)
+        if real == prot_real or real.startswith(prot_real.rstrip(os.sep) + os.sep):
+            raise ValueError("That file belongs to the app and can't be attached.")
+    if os.path.getsize(real) > MAX_ATTACHMENT_BYTES:
+        raise ValueError(f"The attachment is larger than {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB.")
+    with open(real, "rb") as f:
+        return f.read(MAX_ATTACHMENT_BYTES + 1)
+
+
+def safe_image_path(path, max_bytes=5 * 1024 * 1024):
+    """Config-supplied logo paths: image extensions, regular file, small."""
+    if not path:
+        return None
+    real = os.path.realpath(path)
+    if (os.path.splitext(real)[1].lower() in (".png", ".ico", ".jpg", ".jpeg")
+            and os.path.isfile(real) and os.path.getsize(real) <= max_bytes):
+        return real
+    return None
+
+
+
 def _version_tuple(v):
     parts = []
     for p in v.split("."):
@@ -829,11 +901,11 @@ def _verify_release_asset(assets, asset_name, downloaded_path):
             "install an unsigned update."
         )
 
-    checksums_resp = requests.get(checksums_asset["browser_download_url"], timeout=30)
+    checksums_resp = fetch_release_url(checksums_asset["browser_download_url"], timeout=30)
     checksums_resp.raise_for_status()
     checksums_bytes = checksums_resp.content
 
-    sig_resp = requests.get(sig_asset["browser_download_url"], timeout=30)
+    sig_resp = fetch_release_url(sig_asset["browser_download_url"], timeout=30)
     sig_resp.raise_for_status()
     signature_b64 = sig_resp.text.strip()
 
@@ -1117,8 +1189,10 @@ class TicketWindow:
         if self.screenshot_bytes:
             files.append(("files[]", "screenshot.png", self.screenshot_bytes, "image/png"))
         if self.attached_file_path:
-            with open(self.attached_file_path, "rb") as f:
-                file_bytes = f.read()
+            file_bytes = read_attachment(
+                self.attached_file_path,
+                protected_paths=[self.config.get("_source"), data_dir(), os.path.dirname(self.config.get("_source") or "")],
+            )
             files.append(("files[]", os.path.basename(self.attached_file_path), file_bytes, "application/octet-stream"))
 
         category_id = self.selected_category_id or None
@@ -1611,11 +1685,12 @@ def run_app(config_paths, icon_path=None):
 
     def do_open_portal(icon=None, item=None):
         url = provider.portal_url()
-        if url:
+        if url and urlparse(url).scheme in ("http", "https"):
             webbrowser.open(url)
 
     def _download_asset(url, dest):
-        with requests.get(url, stream=True, timeout=120) as r:
+        r = fetch_release_url(url, stream=True, timeout=120)
+        with r:
             r.raise_for_status()
             with open(dest, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):

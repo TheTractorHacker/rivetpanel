@@ -11,6 +11,7 @@ import socket
 import threading
 
 import requests
+from urllib.parse import urlparse
 
 from .base import Category, ChatMessage, ChatUnavailable, PSAProvider, Ticket
 
@@ -22,7 +23,36 @@ class RivetProvider(PSAProvider):
     supports_categories = True
 
     def _base_url(self):
-        return (self.config.get("rivet_base_url") or self.config["itflow_base_url"]).rstrip("/")
+        """Validated server URL: https (http only for localhost or when
+        allow_insecure_http is set), no credentials, no query/fragment."""
+        raw = (self.config.get("rivet_base_url") or self.config.get("itflow_base_url") or "").strip().rstrip("/")
+        u = urlparse(raw)
+        local = u.hostname in ("localhost", "127.0.0.1", "::1")
+        if u.scheme not in ("http", "https") or not u.hostname:
+            raise ValueError("rivet_base_url must be an http(s) URL.")
+        if u.scheme == "http" and not (local or self.config.get("allow_insecure_http")):
+            raise ValueError("rivet_base_url must use https (set allow_insecure_http only for testing).")
+        if u.username or u.password or u.query or u.fragment:
+            raise ValueError("rivet_base_url must not contain credentials, a query or a fragment.")
+        return raw
+
+    @staticmethod
+    def _checked(resp):
+        if resp.is_redirect:
+            resp.close()
+            raise requests.HTTPError(
+                "The server redirected the request. Set rivet_base_url to the final https URL.")
+        return resp
+
+    @classmethod
+    def _get(cls, *a, **kw):
+        # Never follow redirects: X-Api-Key is a custom header, so requests
+        # would resend it to whatever host a redirect points at.
+        return cls._checked(requests.get(*a, allow_redirects=False, **kw))
+
+    @classmethod
+    def _post(cls, *a, **kw):
+        return cls._checked(requests.post(*a, allow_redirects=False, **kw))
 
     def _headers(self):
         """Auth header for RivetIT/RivetMSP API requests.
@@ -55,7 +85,7 @@ class RivetProvider(PSAProvider):
                 for field, filename, content, content_type in files
             ]
 
-        resp = requests.post(
+        resp = self._post(
             f"{self._base_url()}/api/v1/tickets",
             headers=self._headers(),
             data=data,
@@ -82,7 +112,7 @@ class RivetProvider(PSAProvider):
         if cfg.get("contact_id"):
             params["contact_id"] = cfg["contact_id"]
 
-        resp = requests.get(
+        resp = self._get(
             f"{self._base_url()}/api/v1/tickets",
             params=params,
             headers=self._headers(),
@@ -103,7 +133,7 @@ class RivetProvider(PSAProvider):
         ]
 
     def get_ticket(self, ticket_id):
-        resp = requests.get(
+        resp = self._get(
             f"{self._base_url()}/api/v1/tickets/{ticket_id}",
             headers=self._headers(),
             timeout=15,
@@ -120,7 +150,7 @@ class RivetProvider(PSAProvider):
         )
 
     def list_categories(self):
-        resp = requests.get(
+        resp = self._get(
             f"{self._base_url()}/api/v1/ticket-categories",
             headers=self._headers(),
             timeout=15,
@@ -134,7 +164,7 @@ class RivetProvider(PSAProvider):
     # ── Live chat ────────────────────────────────────────────────────────
 
     def poll_chat(self, ticket_id, since_id=0):
-        resp = requests.get(
+        resp = self._get(
             f"{self._base_url()}/api/v1/tickets/{ticket_id}/chat",
             params={"since_id": since_id},
             headers=self._headers(),
@@ -160,7 +190,7 @@ class RivetProvider(PSAProvider):
         body = {"message": message}
         if cfg.get("contact_id"):
             body["contact_id"] = cfg["contact_id"]
-        resp = requests.post(
+        resp = self._post(
             f"{self._base_url()}/api/v1/tickets/{ticket_id}/chat",
             headers=self._headers(),
             json=body,
@@ -182,7 +212,7 @@ class RivetProvider(PSAProvider):
 
         while not stop_event.is_set():
             try:
-                resp = requests.get(
+                resp = self._get(
                     url, params=params, headers=self._headers(), stream=True, timeout=(10, 75)
                 )
                 if resp.status_code == 403:
