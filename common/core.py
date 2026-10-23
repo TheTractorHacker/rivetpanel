@@ -282,7 +282,84 @@ def setup_style(root, accent=None):
         background=[("active", "#dbe2f0")],
     )
 
+    # Combobox / checkbox / scrollbar / table: flat, consistent with the cards
+    style.configure(
+        "TCombobox", padding=7, relief="flat", bordercolor=BORDER, lightcolor=BORDER,
+        darkcolor=BORDER, arrowcolor=TEXT_MUTED, arrowsize=14,
+    )
+    style.map(
+        "TCombobox",
+        fieldbackground=[("readonly", CARD_BG)],
+        background=[("readonly", CARD_BG), ("active", CARD_BG)],
+        bordercolor=[("focus", accent_color)],
+        selectbackground=[("readonly", CARD_BG)],
+        selectforeground=[("readonly", "#1f2533")],
+    )
+    root.option_add("*TCombobox*Listbox.selectBackground", accent_color)
+    root.option_add("*TCombobox*Listbox.font", base_font)
+    style.configure(
+        "TCheckbutton", background=BG, foreground="#1f2533",
+        indicatorcolor=CARD_BG, indicatorbackground=CARD_BG, bordercolor=BORDER,
+    )
+    style.map(
+        "TCheckbutton",
+        indicatorcolor=[("selected", accent_color)],
+        background=[("active", BG)],
+    )
+    style.configure(
+        "Vertical.TScrollbar", background="#e3e8f2", troughcolor=BG, bordercolor=BG,
+        lightcolor="#e3e8f2", darkcolor="#e3e8f2", arrowsize=12, relief="flat",
+    )
+    style.map("Vertical.TScrollbar", background=[("active", "#c9d2e4")])
+    style.configure(
+        "Treeview", background=CARD_BG, fieldbackground=CARD_BG, foreground="#1f2533",
+        rowheight=30, borderwidth=0, relief="flat",
+    )
+    style.map(
+        "Treeview",
+        background=[("selected", accent_color)],
+        foreground=[("selected", "white")],
+    )
+    style.configure(
+        "Treeview.Heading", background="#eef1f8", foreground=TEXT_MUTED, font=bold_font,
+        relief="flat", borderwidth=0, padding=(8, 8),
+    )
+    style.map("Treeview.Heading", background=[("active", "#e3e8f2")])
+    style.layout("Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
+    style.configure("Header.TFrame", background=CARD_BG)
+    style.configure("Header.TLabel", background=CARD_BG, foreground="#1f2533", font=title_font)
+    style.configure("HeaderMuted.TLabel", background=CARD_BG, foreground=TEXT_MUTED)
+
     return style
+
+
+def build_window_header(win, title, subtitle="", icon_path=None, accent=ACCENT, keep=None):
+    """Branded card header with an accent stripe, shared by every window.
+    Returns the header frame; pass `keep` (a list) to hold the PhotoImage."""
+    tk.Frame(win, bg=accent, height=4).pack(fill="x")
+    header = ttk.Frame(win, style="Header.TFrame", padding=(20, 14))
+    header.pack(fill="x")
+    if icon_path and os.path.isfile(icon_path):
+        try:
+            img = ImageTk.PhotoImage(Image.open(icon_path).resize((36, 36)))
+            if keep is not None:
+                keep.append(img)
+            ttk.Label(header, image=img, style="Header.TLabel").pack(side="left", padx=(0, 12))
+        except Exception:
+            pass
+    box = ttk.Frame(header, style="Header.TFrame")
+    box.pack(side="left", fill="x", expand=True)
+    ttk.Label(box, text=title, style="Header.TLabel").pack(anchor="w")
+    if subtitle:
+        ttk.Label(box, text=subtitle, style="HeaderMuted.TLabel").pack(anchor="w")
+    tk.Frame(win, bg=BORDER, height=1).pack(fill="x")
+    return header
+
+
+STATUS_COLORS = {
+    "new": "#2563eb", "open": "#2563eb", "in progress": "#b45309", "assigned": "#b45309",
+    "on hold": "#6b7280", "awaiting": "#7c3aed", "resolved": "#15803d", "closed": "#6b7280",
+}
 
 
 # ── System info ───────────────────────────────────────────────────────────
@@ -837,26 +914,13 @@ class TicketWindow:
                 pass
         self.window = win
 
-        outer = ttk.Frame(win, padding=20, style="TFrame")
+        self._header_keep = []
+        build_window_header(
+            win, "New Support Ticket", "We'll get back to you as soon as possible",
+            self.icon_path, accent=self.config.get("accent_color") or ACCENT, keep=self._header_keep,
+        )
+        outer = ttk.Frame(win, padding=(20, 16, 20, 20), style="TFrame")
         outer.pack(fill="both", expand=True)
-
-        # Header: icon + title
-        header = ttk.Frame(outer, style="TFrame")
-        header.pack(fill="x", pady=(0, 16))
-
-        if self.icon_path and os.path.isfile(self.icon_path):
-            try:
-                img = Image.open(self.icon_path)
-                img = img.resize((32, 32))
-                self._header_img = ImageTk.PhotoImage(img)
-                ttk.Label(header, image=self._header_img, style="TLabel").pack(side="left", padx=(0, 10))
-            except Exception:
-                pass
-
-        title_box = ttk.Frame(header, style="TFrame")
-        title_box.pack(side="left", fill="x", expand=True)
-        ttk.Label(title_box, text="New Support Ticket", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(title_box, text="We'll get back to you as soon as possible", style="Muted.TLabel").pack(anchor="w")
 
         # Subject
         ttk.Label(outer, text="Subject", style="FieldLabel.TLabel").pack(anchor="w", pady=(0, 4))
@@ -1120,10 +1184,14 @@ class RecentTicketsWindow:
         win.protocol("WM_DELETE_WINDOW", win.destroy)
         self.window = win
 
+        self._header_keep = []
+        build_window_header(
+            win, "My Recent Tickets",
+            "Double-click a ticket to open live chat" if self.chat_window else "Your latest requests",
+            None, accent=self.config.get("accent_color") or ACCENT, keep=self._header_keep,
+        )
         outer = ttk.Frame(win, padding=16, style="TFrame")
         outer.pack(fill="both", expand=True)
-
-        ttk.Label(outer, text="My Recent Tickets", style="Title.TLabel").pack(anchor="w", pady=(0, 10))
 
         columns = ("number", "subject", "status", "created")
         self.tree = ttk.Treeview(outer, columns=columns, show="headings", height=10)
@@ -1131,19 +1199,29 @@ class RecentTicketsWindow:
         self.tree.heading("subject", text="Subject")
         self.tree.heading("status", text="Status")
         self.tree.heading("created", text="Created")
-        self.tree.column("number", width=60, anchor="center")
-        self.tree.column("subject", width=280)
-        self.tree.column("status", width=110, anchor="center")
-        self.tree.column("created", width=140, anchor="center")
-        self.tree.pack(fill="both", expand=True)
+        for col in ("number", "subject", "status", "created"):
+            self.tree.heading(col, anchor="w")
+        self.tree.column("number", width=100, anchor="w")
+        self.tree.column("subject", width=270, anchor="w")
+        self.tree.column("status", width=100, anchor="w")
+        self.tree.column("created", width=130, anchor="w")
+        for name, color in STATUS_COLORS.items():
+            self.tree.tag_configure("st_" + name, foreground=color)
+        self.tree.tag_configure("odd", background="#f8f9fc")
+        tree_frame = tk.Frame(outer, bg=BORDER, padx=1, pady=1)
+        tree_frame.pack(fill="both", expand=True)
+        sb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=sb.set)
+        self.tree.pack(in_=tree_frame, side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        tree_frame.lift(); self.tree.lift()
         self.tree.bind("<Double-1>", self._on_double_click)
 
-        loading_text = "Loading... (double-click a ticket to open live chat)" if self.chat_window else "Loading..."
-        self.status_label = ttk.Label(outer, text=loading_text, style="Muted.TLabel")
+        self.status_label = ttk.Label(outer, text="Loading...", style="Muted.TLabel")
         self.status_label.pack(anchor="w", pady=(8, 0))
 
         win.update_idletasks()
-        w, h = 640, 380
+        w, h = 640, 440
         sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
         win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
 
@@ -1166,14 +1244,19 @@ class RecentTicketsWindow:
         for row in self.tree.get_children():
             self.tree.delete(row)
         self.tickets_by_id = {}
-        for t in tickets:
+        for i, t in enumerate(tickets):
             self.tickets_by_id[str(t.id)] = t
-            self.tree.insert("", "end", iid=str(t.id), values=(
+            tags = []
+            status_key = (t.status or "").strip().lower()
+            if status_key in STATUS_COLORS:
+                tags.append("st_" + status_key)
+            if i % 2:
+                tags.append("odd")
+            self.tree.insert("", "end", iid=str(t.id), tags=tags, values=(
                 t.number, t.subject, t.status, (t.created_at or "")[:16],
             ))
-        suffix = " - double-click a ticket to open live chat" if self.chat_window else ""
         self.status_label.configure(
-            text=(f"{len(tickets)} ticket(s){suffix}" if tickets else "No tickets found.")
+            text=(f"{len(tickets)} ticket(s)" if tickets else "No tickets yet - submit one from the tray menu.")
         )
 
     def _show_error(self, message):
@@ -1230,11 +1313,14 @@ class TicketChatWindow:
             win.protocol("WM_DELETE_WINDOW", self._on_close)
             self.window = win
 
+            self._header_keep = []
+            header = build_window_header(
+                win, "Live Chat", "", None,
+                accent=self.config.get("accent_color") or ACCENT, keep=self._header_keep,
+            )
+            self.title_label = header.winfo_children()[-1].winfo_children()[0]
             outer = ttk.Frame(win, padding=16, style="TFrame")
             outer.pack(fill="both", expand=True)
-
-            self.title_label = ttk.Label(outer, text="", style="Title.TLabel")
-            self.title_label.pack(anchor="w", pady=(0, 10))
 
             text_frame = tk.Frame(outer, bg=BORDER, padx=1, pady=1)
             text_frame.pack(fill="both", expand=True, pady=(0, 10))
@@ -1252,6 +1338,15 @@ class TicketChatWindow:
                 state="disabled",
             )
             self.text.pack(fill="both", expand=True)
+            self.text.tag_configure("name_agent", font=("Segoe UI", 9, "bold"), foreground="#374151",
+                                    lmargin1=8, lmargin2=8, spacing1=8)
+            self.text.tag_configure("msg_agent", background="#eef1f8", lmargin1=8, lmargin2=8,
+                                    rmargin=60, spacing1=2, spacing3=4)
+            self.text.tag_configure("name_me", font=("Segoe UI", 9, "bold"), foreground="#1d4ed8",
+                                    justify="right", rmargin=8, lmargin1=60, lmargin2=60, spacing1=8)
+            self.text.tag_configure("msg_me", background="#dbe7ff", justify="right", rmargin=8,
+                                    lmargin1=60, lmargin2=60, spacing1=2, spacing3=4)
+            self.text.tag_configure("empty", foreground=TEXT_MUTED, justify="center", spacing1=60)
 
             entry_row = ttk.Frame(outer, style="TFrame")
             entry_row.pack(fill="x")
@@ -1262,11 +1357,11 @@ class TicketChatWindow:
             self.send_btn.pack(side="right")
 
             win.update_idletasks()
-            w, h = 480, 420
+            w, h = 480, 500
             sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
             win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
 
-        self.title_label.configure(text=f"Live Chat - Ticket #{ticket_number}: {ticket_subject}")
+        self.title_label.configure(text=f"Ticket #{ticket_number}: {ticket_subject}")
         self.text.configure(state="normal")
         self.text.delete("1.0", "end")
         self.text.insert("end", "Loading messages...\n")
@@ -1336,7 +1431,7 @@ class TicketChatWindow:
             self.text.delete("1.0", "end")
             self._seen_ids = set()
             if not messages:
-                self.text.insert("end", "No messages yet. Say hello!\n")
+                self.text.insert("end", "No messages yet. Say hello!\n", "empty")
 
         for m in messages:
             mid = m.id
@@ -1348,7 +1443,9 @@ class TicketChatWindow:
                 self._seen_ids.add(mid)
             sender = m.sender_name or ("Agent" if m.sender_type == "agent" else "You")
             timestamp = (m.created_at or "")[:16]
-            self.text.insert("end", f"{sender} ({timestamp}):\n{m.message}\n\n")
+            side = "agent" if m.sender_type == "agent" else "me"
+            self.text.insert("end", f"{sender}  {timestamp}\n", "name_" + side)
+            self.text.insert("end", f"{m.message}\n", "msg_" + side)
             self.last_id = max(self.last_id, mid or 0)
 
         self.text.configure(state="disabled")
