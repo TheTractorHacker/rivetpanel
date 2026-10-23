@@ -30,6 +30,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Select PSA provider (itflow)
+        run: python scripts/select_provider.py itflow
+
       - name: Build tray app exe with PyInstaller
         working-directory: Windows
         run: pyinstaller itpanel_pro.spec
@@ -78,6 +81,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Select PSA provider (itflow)
+        run: python scripts/select_provider.py itflow
+
       - name: Build binary with PyInstaller
         working-directory: Linux
         run: pyinstaller itpanel_pro.spec
@@ -120,6 +126,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Select PSA provider (itflow)
+        run: python scripts/select_provider.py itflow
+
       - name: Build app with PyInstaller
         working-directory: macOS
         run: pyinstaller itpanel_pro.spec
@@ -143,5 +152,52 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: macOS/itpanel-pro-macos.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Signs the three platform artifacts so common/core.py's self-update mechanism
+  # can verify authenticity before ever extracting/executing a downloaded update.
+  # Runs after all three builds so it can hash the SAME bytes that got uploaded
+  # as release assets, not a locally-rebuilt copy. RELEASE_SIGNING_PRIVATE_KEY is
+  # an Ed25519 private key (base64, raw 32 bytes) - see scripts/sign_release.py
+  # for the format. This secret must be set in the repo's Settings > Secrets
+  # before tagging a release, or do_self_update() will refuse to install it
+  # (fail closed - missing checksums.txt/.sig aborts the update).
+  sign-release:
+    needs: [build-windows, build-linux, build-macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install signing dependency
+        run: pip install cryptography
+
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Sign release assets
+        env:
+          RELEASE_SIGNING_PRIVATE_KEY: ${{ secrets.RELEASE_SIGNING_PRIVATE_KEY }}
+        run: |
+          mkdir -p signed
+          python3 scripts/sign_release.py "$RELEASE_SIGNING_PRIVATE_KEY" signed \
+            dist/itpanel-pro-windows/ITPanelPro.exe \
+            dist/itpanel-pro-windows/ITPanelProSetup.exe \
+            dist/itpanel-pro-linux/itpanel-pro-linux.tar.gz \
+            dist/itpanel-pro-macos/itpanel-pro-macos.zip
+
+      - name: Upload checksums + signature to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            signed/checksums.txt
+            signed/checksums.txt.sig
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

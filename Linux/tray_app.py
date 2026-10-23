@@ -29,9 +29,10 @@ import core  # noqa: E402
 
 
 def config_paths():
+    folder = core.app_folder_slug()
     return [
-        "/etc/itpanel-pro/config.json",
-        os.path.expanduser("~/.config/itpanel-pro/config.json"),
+        f"/etc/{folder}/config.json",
+        os.path.expanduser(f"~/.config/{folder}/config.json"),
     ]
 
 

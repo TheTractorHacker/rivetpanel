@@ -12,21 +12,14 @@ window, offline queueing, update checks, the Quick Tools troubleshooting
 menu, and the tray icon / event loop wiring.
 """
 
+import base64
 import getpass
+import hashlib
 import io
 import json
 import os
 import platform
 import shlex
-
-
-def _api_headers(config: dict) -> dict:
-    """Return auth headers for ITFlow API requests.
-
-    Passes the api_key in a header rather than a URL query parameter
-    so it is never written to web server access logs.
-    """
-    return {"X-Api-Key": config["api_key"]}
 import shutil
 import socket
 import subprocess
@@ -39,14 +32,29 @@ import webbrowser
 import zipfile
 
 import requests
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from PIL import Image, ImageDraw, ImageGrab, ImageTk
 import pystray
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from psa import get_provider_class, get_provider_name
+from psa.base import ChatUnavailable
+
 APP_NAME = "ITPanel Pro"
 VERSION = "2.1.10"
 GITHUB_REPO = "TheTractorHacker/itpanel-pro"
+
+# Ed25519 public key for verifying release authenticity before the self-update
+# mechanism extracts/executes anything downloaded from a GitHub release. The
+# matching private key is held only as a GitHub Actions secret (see
+# scripts/sign_release.py and .github/workflows/build.yml's sign-release job)
+# and is never committed to this repository. Rotating this key requires
+# shipping a new signed release under the OLD key first (so existing installs
+# can still verify and update), since an install can never trust an update
+# signed with a key it doesn't already have embedded.
+RELEASE_SIGNING_PUBLIC_KEY_B64 = "Eb+GNxWfSYRT0f2aaUd63RQBCrhpD36wdQnrgU1vWY8="
 
 
 def _notify(icon, message: str, title: str = APP_NAME, chat: bool = False):
@@ -95,17 +103,34 @@ def app_dir():
     return os.path.dirname(os.path.abspath(sys.argv[0]))
 
 
+def app_folder_name():
+    """PascalCase app folder name for Windows/macOS (ProgramData, Application
+    Support). Resolves to plain "ITPanelPro" for the itflow build so existing
+    installs keep upgrading into the same paths with no migration; other
+    providers get a "ITPanelPro-<Provider>" folder so multiple provider
+    builds can coexist on one machine without colliding."""
+    name = get_provider_name()
+    return "ITPanelPro" if name == "itflow" else f"ITPanelPro-{name.capitalize()}"
+
+
+def app_folder_slug():
+    """kebab-case app folder name for Linux (/etc, XDG dirs). Same
+    itflow-stays-unqualified rule as app_folder_name()."""
+    name = get_provider_name()
+    return "itpanel-pro" if name == "itflow" else f"itpanel-pro-{name}"
+
+
 def data_dir():
     """Per-user writable directory for the offline queue and ticket tracking."""
     system = platform.system()
     if system == "Windows":
         base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
-        path = os.path.join(base, "ITPanelPro")
+        path = os.path.join(base, app_folder_name())
     elif system == "Darwin":
-        path = os.path.expanduser("~/Library/Application Support/ITPanelPro")
+        path = os.path.expanduser(f"~/Library/Application Support/{app_folder_name()}")
     else:
         base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
-        path = os.path.join(base, "itpanel-pro")
+        path = os.path.join(base, app_folder_slug())
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -434,16 +459,19 @@ def queue_dir():
     return path
 
 
-def save_to_queue(data, files_payload):
-    """Persist a ticket submission to retry later.
+def save_to_queue(subject, details, category_id, files_payload):
+    """Persist a ticket submission to retry later, in provider-agnostic form
+    (retrying goes back through provider.create_ticket(), same as a fresh
+    submission).
 
     files_payload: list of (field_name, filename, bytes, content_type)
     """
     item_dir = os.path.join(queue_dir(), str(int(time.time() * 1000)))
     os.makedirs(item_dir, exist_ok=True)
 
+    payload = {"subject": subject, "details": details, "category_id": category_id}
     with open(os.path.join(item_dir, "payload.json"), "w", encoding="utf-8") as f:
-        json.dump(data, f)
+        json.dump(payload, f)
 
     manifest = []
     for i, (field_name, filename, content, content_type) in enumerate(files_payload):
@@ -459,7 +487,7 @@ def save_to_queue(data, files_payload):
         json.dump(manifest, f)
 
 
-def flush_queue(config):
+def flush_queue(config, provider):
     """Try to resend queued tickets. Stops at the first failure (assumed
     still offline). Returns the number successfully sent."""
     qdir = queue_dir()
@@ -472,7 +500,7 @@ def flush_queue(config):
 
         try:
             with open(payload_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+                payload = json.load(f)
 
             files = None
             manifest_path = os.path.join(item_dir, "files.json")
@@ -483,20 +511,14 @@ def flush_queue(config):
                     files = []
                     for entry in manifest:
                         with open(os.path.join(item_dir, entry["stored_as"]), "rb") as fh:
-                            files.append((entry["field"], (entry["filename"], fh.read(), entry["content_type"])))
+                            files.append((entry["field"], entry["filename"], fh.read(), entry["content_type"]))
 
-            base_url = config["itflow_base_url"].rstrip("/")
-            resp = requests.post(
-                f"{base_url}/api/v1/tickets",
-                headers=_api_headers(config),
-                data=data,
-                files=files,
-                timeout=30,
+            ticket = provider.create_ticket(
+                payload["subject"], payload["details"],
+                category_id=payload.get("category_id"), files=files,
             )
-            resp.raise_for_status()
-            result = resp.json()
-            if "id" in result:
-                track_new_ticket(result["id"], result.get("number", "?"), data.get("subject", ""))
+            if ticket.id:
+                track_new_ticket(ticket.id, ticket.number, payload["subject"])
 
             shutil.rmtree(item_dir, ignore_errors=True)
             sent += 1
@@ -540,28 +562,21 @@ def track_new_ticket(ticket_id, number, subject, status="New"):
         pass
 
 
-def poll_ticket_updates(config, icon):
+def poll_ticket_updates(config, provider, icon):
     """Check tracked tickets for status changes and show a notification."""
     tickets = load_tracked_tickets()
     if not tickets:
         return
 
-    base_url = config["itflow_base_url"].rstrip("/")
     changed = False
     for t in tickets:
         try:
-            resp = requests.get(
-                f"{base_url}/api/v1/tickets/{t['id']}",
-                headers=_api_headers(config),
-                timeout=15,
-            )
-            resp.raise_for_status()
-            new_status = resp.json().get("status", t["status"])
+            new_status = provider.get_ticket(t["id"]).status
             if new_status and new_status != t["status"]:
                 _notify(
                     icon,
                     f"Ticket #{t['number']} \"{t['subject']}\" is now {new_status}",
-                    title="ITFlow Ticket Update",
+                    title="Ticket Update",
                 )
                 t["status"] = new_status
                 changed = True
@@ -572,44 +587,38 @@ def poll_ticket_updates(config, icon):
         save_tracked_tickets(tickets)
 
 
-def poll_ticket_chat(config, icon):
+def poll_ticket_chat(config, provider, icon):
     """Check tracked tickets for new agent chat messages and notify."""
+    if not provider.supports_chat:
+        return
+
     tickets = load_tracked_tickets()
     if not tickets:
         return
 
-    base_url = config["itflow_base_url"].rstrip("/")
     changed = False
     for t in tickets:
         last_chat_id = t.get("last_chat_id", 0)
         try:
-            resp = requests.get(
-                f"{base_url}/api/v1/tickets/{t['id']}/chat",
-                params={"since_id": last_chat_id},
-                headers=_api_headers(config),
-                timeout=15,
-            )
-            if resp.status_code == 403:
-                # Live chat module disabled on the server - nothing to do.
-                continue
-            resp.raise_for_status()
-            messages = resp.json().get("data", [])
+            messages = provider.poll_chat(t["id"], since_id=last_chat_id)
+        except ChatUnavailable:
+            continue
         except Exception:
             continue
 
         if not messages:
             continue
 
-        agent_messages = [m for m in messages if m.get("sender_type") == "agent"]
+        agent_messages = [m for m in messages if m.sender_type == "agent"]
         if agent_messages:
             if len(agent_messages) == 1:
-                body = agent_messages[0].get("message", "")
+                body = agent_messages[0].message
             else:
                 body = f"{len(agent_messages)} new messages"
-            _notify(icon, f"Ticket #{t['number']}: {body}", title="ITFlow Live Chat", chat=True)
+            _notify(icon, f"Ticket #{t['number']}: {body}", title="Live Chat", chat=True)
             set_chat_unread(icon, True)
 
-        t["last_chat_id"] = messages[-1]["id"]
+        t["last_chat_id"] = messages[-1].id
         changed = True
 
     if changed:
@@ -618,71 +627,31 @@ def poll_ticket_chat(config, icon):
 
 # ── Live chat (SSE) ──────────────────────────────────────────────────────
 #
-# poll_ticket_chat() above is a 300s safety-net fallback. The functions below
-# subscribe to the same server-sent-events stream the web UI uses (backed by
-# Redis pub/sub - see includes/sse_ticket_chat_stream.php) so new messages
-# arrive within ~1-2 seconds instead of waiting for the next poll.
-
-def _sse_chat_listen(config, ticket_id, on_message, stop_event):
-    """Reconnecting SSE listener for one ticket's live chat channel.
-
-    Calls on_message(event_dict) for every "chat" event received. Runs until
-    stop_event is set. The server intentionally closes the connection every
-    ~60s (see sse_ticket_chat_stream.php's $max_runtime) so a short pause and
-    reconnect on any disconnect is the expected steady state, not an error.
-    """
-    base_url = config["itflow_base_url"].rstrip("/")
-    url = f"{base_url}/api/v1/tickets/{ticket_id}/chat"
-    params = {"stream": 1}
-
-    while not stop_event.is_set():
-        try:
-            resp = requests.get(url, params=params, headers=_api_headers(config), stream=True, timeout=(10, 75))
-            if resp.status_code == 403:
-                # Live chat module disabled server-side - no point retrying.
-                return
-            if resp.status_code != 200:
-                stop_event.wait(15)
-                continue
-
-            event_name = None
-            for line in resp.iter_lines(decode_unicode=True):
-                if stop_event.is_set():
-                    return
-                if line is None or line == "":
-                    event_name = None
-                    continue
-                if line.startswith("event:"):
-                    event_name = line[len("event:"):].strip()
-                elif line.startswith("data:") and event_name == "chat":
-                    try:
-                        on_message(json.loads(line[len("data:"):].strip()))
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-        stop_event.wait(2)
-
+# poll_ticket_chat() above is a 300s safety-net fallback. The listeners below
+# subscribe to a provider's live-push channel (provider.stream_chat(), e.g.
+# ITFlow's server-sent-events stream backed by Redis pub/sub - see
+# includes/sse_ticket_chat_stream.php) so new messages arrive within ~1-2
+# seconds instead of waiting for the next poll. Only invoked for providers
+# where provider.supports_stream_chat is True.
 
 _chat_listeners = {}  # ticket_id -> threading.Event (set to stop)
-_chat_listener_config = None
+_chat_listener_provider = None
 _chat_listener_icon = None
 
 
-def _on_chat_event(icon, tracked_ticket, data):
-    if data.get("sender_type") == "agent":
+def _on_chat_event(icon, tracked_ticket, message):
+    if message.sender_type == "agent":
         _notify(
             icon,
-            f"Ticket #{tracked_ticket['number']}: {data.get('message', '')}",
-            title="ITFlow Live Chat",
+            f"Ticket #{tracked_ticket['number']}: {message.message}",
+            title="Live Chat",
             chat=True,
         )
         set_chat_unread(icon, True)
 
     # Keep last_chat_id in sync so the poll_ticket_chat() fallback doesn't
     # re-notify for messages already delivered live.
-    chat_id = data.get("chat_id", 0)
+    chat_id = message.id or 0
     if not chat_id:
         return
     tickets = load_tracked_tickets()
@@ -696,15 +665,17 @@ def _on_chat_event(icon, tracked_ticket, data):
 
 
 def _ensure_chat_listeners():
-    """Start an SSE listener thread for every tracked ticket that doesn't
-    already have one, and stop listeners for tickets no longer tracked.
+    """Start a stream_chat() listener thread for every tracked ticket that
+    doesn't already have one, and stop listeners for tickets no longer
+    tracked.
 
     Safe to call repeatedly (from the background loop, and immediately after
-    track_new_ticket()) - it's a no-op for tickets already covered.
+    track_new_ticket()) - it's a no-op for tickets already covered, and a
+    no-op entirely for providers that don't support streaming chat.
     """
-    config = _chat_listener_config
+    provider = _chat_listener_provider
     icon = _chat_listener_icon
-    if not config or not icon:
+    if not provider or not icon or not provider.supports_stream_chat:
         return
 
     tickets = load_tracked_tickets()
@@ -720,8 +691,8 @@ def _ensure_chat_listeners():
             continue
         stop_event = threading.Event()
         threading.Thread(
-            target=_sse_chat_listen,
-            args=(config, ticket_id, lambda data, t=t: _on_chat_event(icon, t, data), stop_event),
+            target=provider.stream_chat,
+            args=(ticket_id, lambda message, t=t: _on_chat_event(icon, t, message), stop_event),
             daemon=True,
         ).start()
         _chat_listeners[ticket_id] = stop_event
@@ -755,14 +726,84 @@ def check_for_update():
     return None
 
 
+class ReleaseVerificationError(Exception):
+    """Raised when a downloaded release asset fails signature/checksum
+    verification. do_self_update() treats this as fatal and aborts the update
+    rather than extracting/executing an unverified artifact."""
+
+
+def _verify_release_asset(assets, asset_name, downloaded_path):
+    """Verify that the file at downloaded_path is exactly what the release's
+    Ed25519-signed checksums.txt says it should be. Every self-update MUST
+    call this after downloading a platform asset and BEFORE extracting or
+    executing it - this is the only thing standing between a compromised
+    release feed/GitHub account/MITM download and arbitrary code execution
+    on every installed client.
+
+    Raises ReleaseVerificationError on any failure (missing signature file,
+    bad signature, missing/mismatched checksum entry) - never returns a
+    falsy "not verified" value that could be accidentally ignored.
+    """
+    checksums_asset = next((a for a in assets if a.get("name") == "checksums.txt"), None)
+    sig_asset = next((a for a in assets if a.get("name") == "checksums.txt.sig"), None)
+    if not checksums_asset or not sig_asset:
+        raise ReleaseVerificationError(
+            "Release is missing checksums.txt/checksums.txt.sig - refusing to "
+            "install an unsigned update."
+        )
+
+    checksums_resp = requests.get(checksums_asset["browser_download_url"], timeout=30)
+    checksums_resp.raise_for_status()
+    checksums_bytes = checksums_resp.content
+
+    sig_resp = requests.get(sig_asset["browser_download_url"], timeout=30)
+    sig_resp.raise_for_status()
+    signature_b64 = sig_resp.text.strip()
+
+    try:
+        signature = base64.b64decode(signature_b64)
+        public_key = Ed25519PublicKey.from_public_bytes(
+            base64.b64decode(RELEASE_SIGNING_PUBLIC_KEY_B64)
+        )
+        public_key.verify(signature, checksums_bytes)
+    except (InvalidSignature, ValueError) as exc:
+        raise ReleaseVerificationError(f"Release signature verification failed: {exc}")
+
+    expected_hash = None
+    for line in checksums_bytes.decode("utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        digest, _, name = line.partition("  ")
+        if name.strip() == asset_name:
+            expected_hash = digest.strip()
+            break
+    if not expected_hash:
+        raise ReleaseVerificationError(
+            f"No checksum entry for '{asset_name}' in the signed checksums.txt."
+        )
+
+    actual_hash = hashlib.sha256()
+    with open(downloaded_path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            actual_hash.update(chunk)
+    actual_hash = actual_hash.hexdigest()
+
+    if actual_hash != expected_hash:
+        raise ReleaseVerificationError(
+            f"Checksum mismatch for '{asset_name}': expected {expected_hash}, got {actual_hash}."
+        )
+
+
 # ── Ticket entry window ─────────────────────────────────────────────────────
 
 class TicketWindow:
     """The popup ticket-entry window. One instance reused per open."""
 
-    def __init__(self, root, config, icon_path=None):
+    def __init__(self, root, config, provider, icon_path=None):
         self.root = root
         self.config = config
+        self.provider = provider
         self.icon_path = icon_path
         self.screenshot_bytes = None
         self.attached_file_path = None
@@ -826,7 +867,7 @@ class TicketWindow:
         if self.categories:
             ttk.Label(outer, text="Category", style="FieldLabel.TLabel").pack(anchor="w", pady=(0, 4))
             self.category_var = tk.StringVar(value="Uncategorized")
-            category_names = ["Uncategorized"] + [c["name"] for c in self.categories]
+            category_names = ["Uncategorized"] + [c.name for c in self.categories]
             self.category_combo = ttk.Combobox(
                 outer, textvariable=self.category_var, values=category_names,
                 state="readonly", width=43,
@@ -917,7 +958,7 @@ class TicketWindow:
     def _on_category_selected(self, event=None):
         name = self.category_var.get()
         self.selected_category_id = next(
-            (c["id"] for c in self.categories if c["name"] == name), 0
+            (c.id for c in self.categories if c.name == name), 0
         )
 
     def choose_file(self):
@@ -938,10 +979,23 @@ class TicketWindow:
         except Exception as exc:
             self.window.deiconify()
             self.window.lift()
-            messagebox.showerror(
-                APP_NAME,
-                "Couldn't capture a screenshot on this system:\n" + str(exc),
-            )
+            if platform.system() == "Linux" and os.environ.get("XDG_SESSION_TYPE") == "wayland":
+                # scrot/maim need X11; grim only works on wlroots compositors
+                # (Sway etc.), not GNOME/KDE's Wayland - none of them can be
+                # fixed by installing a different tool under a GNOME/KDE
+                # Wayland session.
+                messagebox.showerror(
+                    APP_NAME,
+                    "Couldn't capture a screenshot: this session is running Wayland, "
+                    "which isn't supported for screen capture on this desktop.\n\n"
+                    "Log out, click the gear/settings icon on the login screen, and "
+                    "choose \"Ubuntu on Xorg\" (or your distro's X11 session), then try again.",
+                )
+            else:
+                messagebox.showerror(
+                    APP_NAME,
+                    "Couldn't capture a screenshot on this system:\n" + str(exc),
+                )
             return
         finally:
             self.window.deiconify()
@@ -990,54 +1044,30 @@ class TicketWindow:
             self.window.after(0, self._submit_error, str(exc))
 
     def _send_ticket(self, subject, details):
-        cfg = self.config
-        base_url = cfg["itflow_base_url"].rstrip("/")
-        url = f"{base_url}/api/v1/tickets"
-
         if self.include_sysinfo_var.get():
             details = details + format_system_info_block(gather_system_info())
 
-        data = {
-            "subject": subject,
-            "details": details,
-            "client_id": cfg["client_id"],
-            "priority": cfg.get("priority", "Medium"),
-            "hostname": socket.gethostname(),
-        }
-        if cfg.get("contact_id"):
-            data["contact_id"] = cfg["contact_id"]
-        if self.selected_category_id:
-            data["category_id"] = self.selected_category_id
-
         files = []
         if self.screenshot_bytes:
-            files.append(("files[]", ("screenshot.png", self.screenshot_bytes, "image/png")))
+            files.append(("files[]", "screenshot.png", self.screenshot_bytes, "image/png"))
         if self.attached_file_path:
             with open(self.attached_file_path, "rb") as f:
                 file_bytes = f.read()
-            files.append(("files[]", (os.path.basename(self.attached_file_path), file_bytes, "application/octet-stream")))
+            files.append(("files[]", os.path.basename(self.attached_file_path), file_bytes, "application/octet-stream"))
 
+        category_id = self.selected_category_id or None
         try:
-            resp = requests.post(
-                url,
-                headers=_api_headers(cfg),
-                data=data,
-                files=files or None,
-                timeout=30,
-            )
-            resp.raise_for_status()
-            result = resp.json()
+            ticket = self.provider.create_ticket(subject, details, category_id=category_id, files=files or None)
         except requests.exceptions.RequestException:
-            files_payload = [(field, f[0], f[1], f[2]) for field, f in files]
-            save_to_queue(data, files_payload)
+            save_to_queue(subject, details, category_id, files)
             return {"queued": True}
 
-        if "id" in result:
-            track_new_ticket(result["id"], result.get("number", "?"), subject)
-        return result
+        if ticket.id:
+            track_new_ticket(ticket.id, ticket.number, subject)
+        return ticket
 
     def _submit_success(self, result=None):
-        if result and result.get("queued"):
+        if isinstance(result, dict) and result.get("queued"):
             self.status_label.configure(
                 text="No connection right now - your ticket was saved and will be "
                      "submitted automatically once you're back online.",
@@ -1065,9 +1095,10 @@ class TicketWindow:
 class RecentTicketsWindow:
     """Shows the most recent tickets for this client/contact."""
 
-    def __init__(self, root, config, chat_window=None):
+    def __init__(self, root, config, provider, chat_window=None):
         self.root = root
         self.config = config
+        self.provider = provider
         self.chat_window = chat_window
         self.window = None
         self.tree = None
@@ -1107,7 +1138,8 @@ class RecentTicketsWindow:
         self.tree.pack(fill="both", expand=True)
         self.tree.bind("<Double-1>", self._on_double_click)
 
-        self.status_label = ttk.Label(outer, text="Loading... (double-click a ticket to open live chat)", style="Muted.TLabel")
+        loading_text = "Loading... (double-click a ticket to open live chat)" if self.chat_window else "Loading..."
+        self.status_label = ttk.Label(outer, text=loading_text, style="Muted.TLabel")
         self.status_label.pack(anchor="w", pady=(8, 0))
 
         win.update_idletasks()
@@ -1122,21 +1154,8 @@ class RecentTicketsWindow:
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self):
-        cfg = self.config
-        base_url = cfg["itflow_base_url"].rstrip("/")
-        params = {
-            "api_key": cfg["api_key"],
-            "status": "all",
-            "limit": 15,
-            "client_id": cfg["client_id"],
-        }
-        if cfg.get("contact_id"):
-            params["contact_id"] = cfg["contact_id"]
-
         try:
-            resp = requests.get(f"{base_url}/api/v1/tickets", params=params, timeout=20)
-            resp.raise_for_status()
-            tickets = resp.json().get("data", [])
+            tickets = self.provider.list_tickets(limit=15)
         except Exception as exc:
             self.root.after(0, self._show_error, str(exc))
             return
@@ -1148,13 +1167,13 @@ class RecentTicketsWindow:
             self.tree.delete(row)
         self.tickets_by_id = {}
         for t in tickets:
-            ticket_id = t.get("id")
-            self.tickets_by_id[str(ticket_id)] = t
-            self.tree.insert("", "end", iid=str(ticket_id), values=(
-                t.get("number"), t.get("subject"), t.get("status"), (t.get("created_at") or "")[:16],
+            self.tickets_by_id[str(t.id)] = t
+            self.tree.insert("", "end", iid=str(t.id), values=(
+                t.number, t.subject, t.status, (t.created_at or "")[:16],
             ))
+        suffix = " - double-click a ticket to open live chat" if self.chat_window else ""
         self.status_label.configure(
-            text=(f"{len(tickets)} ticket(s) - double-click a ticket to open live chat" if tickets else "No tickets found.")
+            text=(f"{len(tickets)} ticket(s){suffix}" if tickets else "No tickets found.")
         )
 
     def _show_error(self, message):
@@ -1167,7 +1186,7 @@ class RecentTicketsWindow:
         ticket = self.tickets_by_id.get(item_id)
         if not ticket:
             return
-        self.chat_window.show(int(item_id), ticket.get("number"), ticket.get("subject"))
+        self.chat_window.show(int(item_id), ticket.number, ticket.subject)
 
 
 class TicketChatWindow:
@@ -1175,9 +1194,10 @@ class TicketChatWindow:
 
     POLL_INTERVAL_MS = 15000
 
-    def __init__(self, root, config, mark_read=None):
+    def __init__(self, root, config, provider, mark_read=None):
         self.root = root
         self.config = config
+        self.provider = provider
         self.mark_read = mark_read
         self.window = None
         self.text = None
@@ -1265,10 +1285,12 @@ class TicketChatWindow:
         self.window.withdraw()
 
     def _start_sse(self):
+        if not self.provider.supports_stream_chat:
+            return
         self._sse_stop_event = threading.Event()
         threading.Thread(
-            target=_sse_chat_listen,
-            args=(self.config, self.ticket_id, self._on_sse_message, self._sse_stop_event),
+            target=self.provider.stream_chat,
+            args=(self.ticket_id, self._on_sse_message, self._sse_stop_event),
             daemon=True,
         ).start()
 
@@ -1277,15 +1299,7 @@ class TicketChatWindow:
             self._sse_stop_event.set()
             self._sse_stop_event = None
 
-    def _on_sse_message(self, data):
-        message = {
-            "id": data.get("chat_id"),
-            "sender_type": data.get("sender_type"),
-            "sender_id": data.get("sender_id"),
-            "sender_name": data.get("sender_name"),
-            "message": data.get("message"),
-            "created_at": data.get("created_at"),
-        }
+    def _on_sse_message(self, message):
         self.root.after(0, self._append_messages, [message], False)
 
     def _schedule_poll(self):
@@ -1301,17 +1315,8 @@ class TicketChatWindow:
         threading.Thread(target=self._fetch_messages, args=(self.ticket_id, 0), daemon=True).start()
 
     def _fetch_messages(self, ticket_id, since_id):
-        cfg = self.config
-        base_url = cfg["itflow_base_url"].rstrip("/")
         try:
-            resp = requests.get(
-                f"{base_url}/api/v1/tickets/{ticket_id}/chat",
-                params={"since_id": since_id},
-                headers=_api_headers(cfg),
-                timeout=15,
-            )
-            resp.raise_for_status()
-            messages = resp.json().get("data", [])
+            messages = self.provider.poll_chat(ticket_id, since_id=since_id)
         except Exception as exc:
             if ticket_id == self.ticket_id and since_id == 0:
                 self.root.after(0, self._show_error, str(exc))
@@ -1334,16 +1339,16 @@ class TicketChatWindow:
                 self.text.insert("end", "No messages yet. Say hello!\n")
 
         for m in messages:
-            mid = m.get("id")
+            mid = m.id
             if mid and mid in self._seen_ids:
                 # Already shown - the periodic poll and the SSE listener can
                 # both deliver the same message.
                 continue
             if mid:
                 self._seen_ids.add(mid)
-            sender = m.get("sender_name") or ("Agent" if m.get("sender_type") == "agent" else "You")
-            timestamp = (m.get("created_at") or "")[:16]
-            self.text.insert("end", f"{sender} ({timestamp}):\n{m.get('message', '')}\n\n")
+            sender = m.sender_name or ("Agent" if m.sender_type == "agent" else "You")
+            timestamp = (m.created_at or "")[:16]
+            self.text.insert("end", f"{sender} ({timestamp}):\n{m.message}\n\n")
             self.last_id = max(self.last_id, mid or 0)
 
         self.text.configure(state="disabled")
@@ -1363,19 +1368,8 @@ class TicketChatWindow:
         threading.Thread(target=self._send_message, args=(self.ticket_id, message), daemon=True).start()
 
     def _send_message(self, ticket_id, message):
-        cfg = self.config
-        base_url = cfg["itflow_base_url"].rstrip("/")
-        body = {"message": message}
-        if cfg.get("contact_id"):
-            body["contact_id"] = cfg["contact_id"]
         try:
-            resp = requests.post(
-                f"{base_url}/api/v1/tickets/{ticket_id}/chat",
-                headers=_api_headers(cfg),
-                json=body,
-                timeout=15,
-            )
-            resp.raise_for_status()
+            self.provider.send_chat_message(ticket_id, message)
         except Exception as exc:
             if ticket_id == self.ticket_id:
                 self.root.after(0, lambda: messagebox.showerror(APP_NAME, f"Couldn't send message: {exc}"))
@@ -1383,6 +1377,65 @@ class TicketChatWindow:
 
         if ticket_id == self.ticket_id:
             self.root.after(0, self._poll)
+
+
+def _install_xorg_context_menu(icon, root, menu):
+    """Make right-click work on pystray's bare Xlib fallback backend.
+
+    pystray tries backends in this order on Linux: appindicator -> gtk ->
+    xorg, and the first two both require the "gi" (PyGObject) bindings. Our
+    CI build (.github/workflows/build.yml) apt-installs python3-gi /
+    gir1.2-appindicator3-0.1 for the *system* Python, but freezes the app
+    with actions/setup-python's isolated interpreter, which never sees those
+    bindings - so every shipped Linux build always falls through to
+    pystray._xorg, regardless of what the end user has installed. That
+    backend (HAS_MENU = False) has no menu support at all and its
+    _on_button_press only reacts to the left button, silently dropping every
+    right-click. Replace its button handler with one that also opens a real
+    Tkinter popup menu on right-click, so the tray behaves like Windows/macOS.
+    """
+    if not type(icon).__module__.endswith("_xorg"):
+        return  # native AppIndicator/GTK backend already has a real menu
+
+    try:
+        import Xlib.X
+    except ImportError:
+        return
+
+    def build_tk_menu(parent, items):
+        for entry in items:
+            if entry is pystray.Menu.SEPARATOR:
+                parent.add_separator()
+            elif entry.submenu is not None:
+                sub = tk.Menu(parent, tearoff=0)
+                build_tk_menu(sub, entry.submenu)
+                parent.add_cascade(label=entry.text, menu=sub)
+            else:
+                parent.add_command(
+                    label=entry.text,
+                    state="normal" if entry.enabled else "disabled",
+                    command=lambda item=entry: item(icon),
+                )
+
+    def show_menu():
+        tk_menu = tk.Menu(root, tearoff=0)
+        build_tk_menu(tk_menu, menu)
+        x, y = root.winfo_pointerx(), root.winfo_pointery()
+        try:
+            tk_menu.tk_popup(x, y)
+        finally:
+            tk_menu.grab_release()
+
+    def on_button_press(event):
+        if event.detail == 1:
+            icon()  # left click - same default-item behavior as before
+        elif event.detail == 3:
+            root.after(0, show_menu)
+
+    try:
+        icon._message_handlers[Xlib.X.ButtonPress] = on_button_press
+    except AttributeError:
+        pass
 
 
 def run_app(config_paths, icon_path=None):
@@ -1402,6 +1455,8 @@ def run_app(config_paths, icon_path=None):
         messagebox.showerror(APP_NAME, str(exc))
         sys.exit(1)
 
+    provider = get_provider_class()(config)
+
     root = tk.Tk()
     root.withdraw()  # hidden root, used only to host Toplevel windows
     setup_style(root, accent=config.get("accent_color"))
@@ -1414,22 +1469,18 @@ def run_app(config_paths, icon_path=None):
         # (i.e. well after the tray icon exists and the event loop is running).
         set_chat_unread(icon, False)
 
-    ticket_window = TicketWindow(root, config, icon_path=icon_path)
-    chat_window = TicketChatWindow(root, config, mark_read=mark_chat_read)
-    recent_window = RecentTicketsWindow(root, config, chat_window=chat_window)
+    ticket_window = TicketWindow(root, config, provider, icon_path=icon_path)
+    chat_window = TicketChatWindow(root, config, provider, mark_read=mark_chat_read) if provider.supports_chat else None
+    recent_window = RecentTicketsWindow(root, config, provider, chat_window=chat_window)
 
     # Load ticket categories in the background so the dropdown is ready
-    # by the time the user opens the New Ticket window.
+    # by the time the user opens the New Ticket window. No-op for providers
+    # that don't support categories.
     def load_categories():
+        if not provider.supports_categories:
+            return
         try:
-            base_url = config["itflow_base_url"].rstrip("/")
-            resp = requests.get(
-                f"{base_url}/api/v1/ticket-categories",
-                headers=_api_headers(config),
-                timeout=15,
-            )
-            resp.raise_for_status()
-            ticket_window.categories = resp.json() or []
+            ticket_window.categories = provider.list_categories()
         except Exception:
             pass
     threading.Thread(target=load_categories, daemon=True).start()
@@ -1460,8 +1511,9 @@ def run_app(config_paths, icon_path=None):
         open_network_adapters()
 
     def do_open_portal(icon=None, item=None):
-        base_url = config["itflow_base_url"].rstrip("/")
-        webbrowser.open(f"{base_url}/client/")
+        url = provider.portal_url()
+        if url:
+            webbrowser.open(url)
 
     def _download_asset(url, dest):
         with requests.get(url, stream=True, timeout=120) as r:
@@ -1484,18 +1536,32 @@ def run_app(config_paths, icon_path=None):
         system = platform.system()
         assets = release.get("assets", [])
 
+        # Scope asset matching to this build's provider so a release tag
+        # carrying multiple providers' installers never cross-updates one
+        # provider's install with another's binary. The itflow build keeps
+        # its original unqualified filenames for upgrade continuity with
+        # installs from before multi-provider support existed.
+        provider_name = get_provider_name()
+        if provider_name == "itflow":
+            windows_suffix, macos_suffix, linux_suffix = "setup.exe", "-macos.zip", "-linux.tar.gz"
+        else:
+            windows_suffix = f"-{provider_name}-setup.exe"
+            macos_suffix = f"-{provider_name}-macos.zip"
+            linux_suffix = f"-{provider_name}-linux.tar.gz"
+
         _notify(icon, f"Downloading v{tag} update...", title=APP_NAME)
 
         try:
             tmp_dir = tempfile.mkdtemp(prefix="itpanelpro_update_")
 
             if system == "Windows":
-                asset = next((a for a in assets if a["name"].lower().endswith("setup.exe")), None)
+                asset = next((a for a in assets if a["name"].lower().endswith(windows_suffix)), None)
                 if not asset:
                     root.after(0, lambda: messagebox.showerror(APP_NAME, "Windows installer not found in release."))
                     return
                 dest = os.path.join(tmp_dir, asset["name"])
                 _download_asset(asset["browser_download_url"], dest)
+                _verify_release_asset(assets, asset["name"], dest)
                 subprocess.Popen([dest, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
                 _notify(icon, f"Installing v{tag} — restarting...", title=APP_NAME)
 
@@ -1505,12 +1571,13 @@ def run_app(config_paths, icon_path=None):
                 app_bundle = os.path.normpath(
                     os.path.join(os.path.dirname(sys.executable), "..", "..")
                 )
-                asset = next((a for a in assets if a["name"].lower().endswith("-macos.zip")), None)
+                asset = next((a for a in assets if a["name"].lower().endswith(macos_suffix)), None)
                 if not asset:
                     root.after(0, lambda: messagebox.showerror(APP_NAME, "macOS update not found in release."))
                     return
                 dest = os.path.join(tmp_dir, asset["name"])
                 _download_asset(asset["browser_download_url"], dest)
+                _verify_release_asset(assets, asset["name"], dest)
                 with zipfile.ZipFile(dest, "r") as z:
                     for name in z.namelist():
                         if ".." not in name and not name.startswith("/"):
@@ -1538,12 +1605,13 @@ open -a {shlex.quote(app_bundle)}
 
             elif system == "Linux" and getattr(sys, "frozen", False):
                 current_binary = sys.executable  # e.g. /opt/itpanel-pro/ITPanelPro
-                asset = next((a for a in assets if a["name"].lower().endswith("-linux.tar.gz")), None)
+                asset = next((a for a in assets if a["name"].lower().endswith(linux_suffix)), None)
                 if not asset:
                     root.after(0, lambda: messagebox.showerror(APP_NAME, "Linux update not found in release."))
                     return
                 dest = os.path.join(tmp_dir, asset["name"])
                 _download_asset(asset["browser_download_url"], dest)
+                _verify_release_asset(assets, asset["name"], dest)
                 with tarfile.open(dest, "r:gz") as t:
                     for member in t.getmembers():
                         if ".." not in member.name and not member.name.startswith("/"):
@@ -1600,20 +1668,25 @@ disown
         pystray.MenuItem("Network Adapters", do_network_adapters),
     )
 
-    menu = pystray.Menu(
+    menu_items = [
         pystray.MenuItem("New Ticket", open_window, default=True),
         pystray.MenuItem("My Recent Tickets", open_recent),
-        pystray.MenuItem("Open Client Portal", do_open_portal),
+    ]
+    if provider.portal_url():
+        menu_items.append(pystray.MenuItem("Open Client Portal", do_open_portal))
+    menu_items += [
         pystray.MenuItem("Quick Tools", quick_tools_menu),
         pystray.MenuItem("Check for Updates", do_check_update),
         pystray.MenuItem("Exit", quit_app),
-    )
+    ]
+    menu = pystray.Menu(*menu_items)
 
     icon = pystray.Icon(APP_NAME, tray_image, APP_NAME, menu)
     icon._base_image = tray_image  # read by set_chat_unread() to build/clear the badge
+    _install_xorg_context_menu(icon, root, menu)
 
-    global _chat_listener_config, _chat_listener_icon
-    _chat_listener_config = config
+    global _chat_listener_provider, _chat_listener_icon
+    _chat_listener_provider = provider
     _chat_listener_icon = icon
 
     tray_thread = threading.Thread(target=icon.run, daemon=True)
@@ -1627,15 +1700,15 @@ disown
         _ensure_chat_listeners()
         while True:
             try:
-                flush_queue(config)
+                flush_queue(config, provider)
             except Exception:
                 pass
             try:
-                poll_ticket_updates(config, icon)
+                poll_ticket_updates(config, provider, icon)
             except Exception:
                 pass
             try:
-                poll_ticket_chat(config, icon)
+                poll_ticket_chat(config, provider, icon)
             except Exception:
                 pass
             try:

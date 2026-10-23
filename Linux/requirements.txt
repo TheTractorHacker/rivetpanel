@@ -2,6 +2,7 @@ pystray
 Pillow
 requests
 pyinstaller
+cryptography
 
 # System packages also required (install via your distro's package manager):
 #   - A system tray host that supports StatusNotifierItem/AppIndicator

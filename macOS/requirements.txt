@@ -3,3 +3,4 @@ pyobjc-framework-Cocoa
 Pillow
 requests
 pyinstaller
+cryptography

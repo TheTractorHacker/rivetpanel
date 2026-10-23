@@ -42,6 +42,15 @@ PRIORITY="${5:-Medium}"
 # Stop any running instance so the binary can be replaced cleanly.
 pkill -f "$INSTALL_DIR/ITPanelPro" 2>/dev/null || true
 
+# Best-effort: install a screenshot helper for the "Attach Screenshot"
+# feature (Pillow's ImageGrab.grab() shells out to scrot on X11). Only
+# helps under an X11 session - GNOME/KDE Wayland sessions can't capture
+# with any of these tools, the app shows guidance to switch sessions.
+if command -v apt-get >/dev/null 2>&1 && ! command -v scrot >/dev/null 2>&1; then
+    apt-get update -qq || true
+    apt-get install -y scrot || echo "Warning: failed to install scrot; screenshot capture may not work." >&2
+fi
+
 # Remove a previous "ITFlow Quick Ticket" install, migrating its config first.
 if [ -d "$OLD_INSTALL_DIR" ] || [ -f "$OLD_AUTOSTART_FILE" ]; then
     echo "Removing previous ITFlow Quick Ticket install..."
@@ -94,7 +103,15 @@ with open(sys.argv[6], 'w') as f:
     json.dump(data, f, indent=4)
     f.write('\n')
 " "$ITFLOW_BASE_URL" "$API_KEY" "$CLIENT_ID" "$CONTACT_JSON" "$PRIORITY" "$CONFIG_PATH"
-    chmod 600 "$CONFIG_PATH"
+    # 600 would block the app itself from reading this file: it runs as
+    # whichever user is interactively logged in (autostarted per-session via
+    # XDG autostart, not as a service), not as root, and there is no
+    # supplementary group/ACL enrollment step here to grant a specific user
+    # read access. 644 (root-owned, world-readable) keeps the file writable
+    # only by root - a non-root local user can't tamper with it to redirect
+    # the app at an attacker-controlled server - while preserving the read
+    # access every real invocation of the app actually needs to function.
+    chmod 644 "$CONFIG_PATH"
 elif [ ! -f "$CONFIG_PATH" ]; then
     echo "No config.json exists and no connection settings were passed." >&2
     echo "Usage: $0 <itflow_base_url> <api_key> <client_id> [contact_id] [priority]" >&2

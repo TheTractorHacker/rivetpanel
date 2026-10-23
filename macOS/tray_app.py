@@ -23,9 +23,10 @@ import core  # noqa: E402
 
 
 def config_paths():
+    folder = core.app_folder_name()
     return [
-        "/Library/Application Support/ITPanelPro/config.json",
-        os.path.expanduser("~/Library/Application Support/ITPanelPro/config.json"),
+        f"/Library/Application Support/{folder}/config.json",
+        os.path.expanduser(f"~/Library/Application Support/{folder}/config.json"),
     ]
 
 

@@ -24,7 +24,7 @@ def config_paths():
     paths = []
     program_data = os.environ.get("ProgramData")
     if program_data:
-        paths.append(os.path.join(program_data, "ITPanelPro", "config.json"))
+        paths.append(os.path.join(program_data, core.app_folder_name(), "config.json"))
     return paths
 
 

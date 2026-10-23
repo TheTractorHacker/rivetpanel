@@ -15,7 +15,7 @@ a = Analysis(
     datas=[
         ('assets/icon.ico', 'assets'),
     ] if os.path.exists('assets/icon.ico') else [],
-    hiddenimports=['PIL._tkinter_finder'],
+    hiddenimports=['PIL._tkinter_finder', 'cryptography.hazmat.bindings._rust'],
     hookspath=[],
     runtime_hooks=[],
     excludes=[],

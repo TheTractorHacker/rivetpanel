@@ -94,7 +94,15 @@ with open(sys.argv[6], 'w') as f:
     json.dump(data, f, indent=4)
     f.write('\n')
 " "$ITFLOW_BASE_URL" "$API_KEY" "$CLIENT_ID" "$CONTACT_JSON" "$PRIORITY" "$CONFIG_PATH"
-    chmod 600 "$CONFIG_PATH"
+    # 600 would block the app itself from reading this file: it runs as
+    # whichever user is interactively logged in (a LaunchAgent, not a
+    # privileged LaunchDaemon), not as root, and there is no supplementary
+    # group/ACL enrollment step here to grant a specific user read access.
+    # 644 (root-owned, world-readable) keeps the file writable only by root -
+    # a non-root local user can't tamper with it to redirect the app at an
+    # attacker-controlled server - while preserving the read access every
+    # real invocation of the app actually needs to function.
+    chmod 644 "$CONFIG_PATH"
 elif [ ! -f "$CONFIG_PATH" ]; then
     echo "No config.json exists and no connection settings were passed." >&2
     echo "Usage: $0 <itflow_base_url> <api_key> <client_id> [contact_id] [priority]" >&2

@@ -649,6 +649,18 @@ begin
   Result := R;
 end;
 
+// S-1-5-32-544 = BUILTIN\Administrators, S-1-5-18 = SYSTEM (both Full
+// control), S-1-5-11 = Authenticated Users (Read only). /inheritance:r
+// removes whatever ACL config.json would otherwise inherit from ProgramData.
+procedure HardenConfigFileAcl(const ConfigPath: String);
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\icacls.exe'), '"' + ConfigPath + '" /inheritance:r ' +
+    '/grant:r "*S-1-5-32-544:F" /grant:r "*S-1-5-18:F" /grant:r "*S-1-5-11:R"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 procedure WriteConfigFile;
 var
   BaseUrl, ApiKey, ClientId, ContactId, Priority: String;
@@ -685,6 +697,18 @@ begin
     ForceDirectories(ConfigDir);
 
   SaveStringToFile(ConfigPath, Json, False);
+
+  // Lock down write access to Administrators/SYSTEM only, so a non-admin
+  // local user can't tamper with config.json to redirect the app at an
+  // attacker-controlled server (e.g. rewriting itflow_base_url). Read access
+  // is intentionally kept for Authenticated Users: the app runs as whichever
+  // user is interactively logged in (a Startup-folder shortcut, not a
+  // service), not as an admin, so restricting read here would just break it
+  // for its real users - see the equivalent Linux/macOS install.sh comment
+  // (chmod 644, not 600, for the same reason). Well-known SIDs are used
+  // instead of group names since "Administrators" etc. are localized on
+  // non-English Windows.
+  HardenConfigFileAcl(ConfigPath);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
