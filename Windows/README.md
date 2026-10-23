@@ -181,6 +181,9 @@ once the update finishes, with no manual download/rerun needed.
 | `include_system_info`   | no       | Auto-attach hostname/OS/user/local IP to ticket details (default `true`) |
 | `check_for_updates`     | no       | Silently check GitHub for newer releases on startup (default `true`) |
 | `accent_color`          | no       | Hex color (e.g. `"#16a34a"`) to re-brand the accent color used in the New Ticket window |
+| `company_name`          | no       | Shown in the New Ticket header ("<name> will get back to you...") |
+| `support_phone`         | no       | Adds a "Call Support" tray menu item (tel: link) |
+| `support_email`         | no       | Adds an "Email Support" tray menu item (mailto: link) |
 | `branding_logo`         | no       | Absolute path to a `.png` to use as the tray icon and window header logo instead of the default RivetIT/RivetMSP icon |
 
 The installer only prompts for the first five fields above; the branding

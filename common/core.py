@@ -916,7 +916,9 @@ class TicketWindow:
 
         self._header_keep = []
         build_window_header(
-            win, "New Support Ticket", "We'll get back to you as soon as possible",
+            win, "New Support Ticket",
+            (f"{self.config['company_name']} will get back to you as soon as possible"
+             if self.config.get("company_name") else "We'll get back to you as soon as possible"),
             self.icon_path, accent=self.config.get("accent_color") or ACCENT, keep=self._header_keep,
         )
         outer = ttk.Frame(win, padding=(20, 16, 20, 20), style="TFrame")
@@ -1771,6 +1773,14 @@ disown
     ]
     if provider.portal_url():
         menu_items.append(pystray.MenuItem("Open Client Portal", do_open_portal))
+    if config.get("support_phone"):
+        phone = str(config["support_phone"])
+        menu_items.append(pystray.MenuItem(
+            f"Call Support ({phone})", lambda icon=None, item=None: webbrowser.open("tel:" + "".join(c for c in phone if c.isdigit() or c == "+"))))
+    if config.get("support_email"):
+        email = str(config["support_email"])
+        menu_items.append(pystray.MenuItem(
+            "Email Support", lambda icon=None, item=None: webbrowser.open("mailto:" + email)))
     menu_items += [
         pystray.MenuItem("Quick Tools", quick_tools_menu),
         pystray.MenuItem("Check for Updates", do_check_update),
