@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" width="128" alt="RivetPanel logo"></p>
+
 # RivetPanel
 
 [![Latest release](https://img.shields.io/github/v/release/TheTractorHacker/rivetpanel?include_prereleases&label=release)](https://github.com/TheTractorHacker/rivetpanel/releases/latest)
