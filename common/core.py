@@ -28,6 +28,7 @@ import tarfile
 import tempfile
 import threading
 import time
+import uuid
 import webbrowser
 import zipfile
 
@@ -536,7 +537,7 @@ def queue_dir():
     return path
 
 
-def save_to_queue(subject, details, category_id, files_payload):
+def save_to_queue(subject, details, category_id, files_payload, request_id=None):
     """Persist a ticket submission to retry later, in provider-agnostic form
     (retrying goes back through provider.create_ticket(), same as a fresh
     submission).
@@ -546,7 +547,7 @@ def save_to_queue(subject, details, category_id, files_payload):
     item_dir = os.path.join(queue_dir(), str(int(time.time() * 1000)))
     os.makedirs(item_dir, exist_ok=True)
 
-    payload = {"subject": subject, "details": details, "category_id": category_id}
+    payload = {"subject": subject, "details": details, "category_id": category_id, "request_id": request_id}
     with open(os.path.join(item_dir, "payload.json"), "w", encoding="utf-8") as f:
         json.dump(payload, f)
 
@@ -593,6 +594,7 @@ def flush_queue(config, provider):
             ticket = provider.create_ticket(
                 payload["subject"], payload["details"],
                 category_id=payload.get("category_id"), files=files,
+                request_id=payload.get("request_id"),
             )
             if ticket.id:
                 track_new_ticket(ticket.id, ticket.number, payload["subject"])
@@ -1196,10 +1198,14 @@ class TicketWindow:
             files.append(("files[]", os.path.basename(self.attached_file_path), file_bytes, "application/octet-stream"))
 
         category_id = self.selected_category_id or None
+        # One id per user action: the server de-duplicates retries (including the
+        # offline queue's) so a dropped connection never creates two tickets.
+        request_id = str(uuid.uuid4())
         try:
-            ticket = self.provider.create_ticket(subject, details, category_id=category_id, files=files or None)
+            ticket = self.provider.create_ticket(
+                subject, details, category_id=category_id, files=files or None, request_id=request_id)
         except requests.exceptions.RequestException:
-            save_to_queue(subject, details, category_id, files)
+            save_to_queue(subject, details, category_id, files, request_id=request_id)
             return {"queued": True}
 
         if ticket.id:
@@ -1659,7 +1665,15 @@ def run_app(config_paths, icon_path=None):
     threading.Thread(target=load_categories, daemon=True).start()
 
     def open_window(icon=None, item=None):
-        root.after(0, ticket_window.show)
+        def show():
+            can = getattr(provider, "can_create_tickets", None)
+            if can and provider.enrolled() and not can():
+                messagebox.showinfo(
+                    APP_NAME, "Your IT provider hasn't enabled ticket creation from this PC yet.\n"
+                              "Please contact them directly.")
+                return
+            ticket_window.show()
+        root.after(0, show)
 
     def open_recent(icon=None, item=None):
         root.after(0, recent_window.show)

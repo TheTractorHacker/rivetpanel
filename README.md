@@ -27,6 +27,17 @@ install time so the end user never sees credentials.
 </tr>
 </table>
 
+## Security model: per-device enrollment
+
+RivetPanel no longer needs a shared admin API key on every PC. An administrator mints an
+**enrollment token** for a client (and optionally a person) on the RivetIT/RivetMSP Deploy page and passes it
+to the installer (`/EnrollmentToken=rvtp1...`, `deploy_rivetpanel.ps1 -EnrollmentToken`, or
+`install.sh <url> <rvtp1...token>`). On first run the app swaps it for its **own device credential**, stored in the user's
+data folder (Windows: DPAPI-protected). The server scopes that credential to one client; it can create and read tickets
+and chat for that client and nothing else, and an administrator can revoke it per device. A fleet token (up to N machines,
+short-lived) covers an RMM mass deployment. Installs that still carry the legacy `api_key` keep working until redeployed.
+The server side is the RivetCore Panel API ([PANEL_API.md](https://github.com/TheTractorHacker/rivet-core/blob/main/docs/panel/PANEL_API.md)).
+
 ## Features
 
 - New Ticket window with subject, description, screenshot, and file

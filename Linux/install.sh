@@ -83,7 +83,33 @@ fi
 
 install -m 644 "$SCRIPT_DIR/rivetpanel.desktop" "$AUTOSTART_DIR/rivetpanel.desktop"
 
-if [ -n "$RIVET_BASE_URL" ] && [ -n "$API_KEY" ] && [ -n "$CLIENT_ID" ]; then
+lock_config() {
+    # The app runs as whichever user is logged in (XDG autostart), not as
+    # root, so 600 root:root would lock it out - but the API key must not be
+    # world-readable either. Use a dedicated group: root-owned (so users
+    # cannot redirect the app at another server), readable only by members.
+    # Members: the user who ran sudo, anyone in RIVETPANEL_USERS (space
+    # separated), and every user with a current login session.
+    getent group rivetpanel >/dev/null || groupadd --system rivetpanel
+    chown root:rivetpanel "$CONFIG_PATH"
+    chmod 640 "$CONFIG_PATH"
+    for u in ${SUDO_USER:-} ${RIVETPANEL_USERS:-} $(loginctl list-users --no-legend 2>/dev/null | awk '{print $2}'); do
+        [ "$u" != "root" ] && id "$u" >/dev/null 2>&1 && usermod -aG rivetpanel "$u"
+    done
+    echo "Config readable by group 'rivetpanel'. Other users: usermod -aG rivetpanel <user> (then re-login)."
+}
+
+if [ -n "$RIVET_BASE_URL" ] && [[ "$API_KEY" == rvtp1.* ]]; then
+    # Device-token install: the second argument is an enrollment token, no
+    # shared API key is stored. The server knows the client and contact.
+    python3 -c "
+import json, sys
+with open(sys.argv[3], 'w') as f:
+    json.dump({'rivet_base_url': sys.argv[1], 'enrollment_token': sys.argv[2]}, f, indent=4)
+    f.write('\n')
+" "$RIVET_BASE_URL" "$API_KEY" "$CONFIG_PATH"
+    lock_config
+elif [ -n "$RIVET_BASE_URL" ] && [ -n "$API_KEY" ] && [ -n "$CLIENT_ID" ]; then
     if [ -n "$CONTACT_ID" ]; then
         CONTACT_JSON="$CONTACT_ID"
     else
@@ -103,19 +129,7 @@ with open(sys.argv[6], 'w') as f:
     json.dump(data, f, indent=4)
     f.write('\n')
 " "$RIVET_BASE_URL" "$API_KEY" "$CLIENT_ID" "$CONTACT_JSON" "$PRIORITY" "$CONFIG_PATH"
-    # The app runs as whichever user is logged in (XDG autostart), not as
-    # root, so 600 root:root would lock it out - but the API key must not be
-    # world-readable either. Use a dedicated group: root-owned (so users
-    # cannot redirect the app at another server), readable only by members.
-    # Members: the user who ran sudo, anyone in RIVETPANEL_USERS (space
-    # separated), and every user with a current login session.
-    getent group rivetpanel >/dev/null || groupadd --system rivetpanel
-    chown root:rivetpanel "$CONFIG_PATH"
-    chmod 640 "$CONFIG_PATH"
-    for u in ${SUDO_USER:-} ${RIVETPANEL_USERS:-} $(loginctl list-users --no-legend 2>/dev/null | awk '{print $2}'); do
-        [ "$u" != "root" ] && id "$u" >/dev/null 2>&1 && usermod -aG rivetpanel "$u"
-    done
-    echo "Config readable by group 'rivetpanel'. Other users: usermod -aG rivetpanel <user> (then re-login)."
+    lock_config
 elif [ ! -f "$CONFIG_PATH" ]; then
     echo "No config.json exists and no connection settings were passed." >&2
     echo "Usage: $0 <rivet_base_url> <api_key> <client_id> [contact_id] [priority]" >&2

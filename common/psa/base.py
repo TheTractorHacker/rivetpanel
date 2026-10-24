@@ -59,8 +59,10 @@ class PSAProvider:
     def __init__(self, config: dict):
         self.config = config
 
-    def create_ticket(self, subject: str, details: str, *, category_id=None, files=None) -> Ticket:
-        """files: list of (field_name, filename, bytes, content_type), or None."""
+    def create_ticket(self, subject: str, details: str, *, category_id=None, files=None, request_id=None) -> Ticket:
+        """files: list of (field_name, filename, bytes, content_type), or None.
+        request_id: stable id for one user action, reused on retries (providers
+        that support idempotent creation send it; others ignore it)."""
         raise NotImplementedError
 
     def list_tickets(self, *, limit: int = 15) -> list:

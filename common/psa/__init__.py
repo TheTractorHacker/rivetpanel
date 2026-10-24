@@ -14,8 +14,8 @@ def get_provider_class():
         from . import _selected
         return _selected.PROVIDER_CLASS
     except ImportError:
-        from .rivet import RivetProvider
-        return RivetProvider
+        from .rivet_select import make_provider
+        return make_provider
 
 
 def get_provider_name():

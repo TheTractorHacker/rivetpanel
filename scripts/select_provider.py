@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 PROVIDERS = {
-    "rivet": ("rivet", "RivetProvider"),
+    "rivet": ("rivet_select", "make_provider"),
 }
 
 TEMPLATE = """\

@@ -14,6 +14,8 @@
 ; Supports unattended installs, e.g.:
 ;   RivetPanelSetup.exe /VERYSILENT /SUPPRESSMSGBOXES ^
 ;     /RivetBaseUrl=https://psa.example.com ^
+;     /EnrollmentToken=rvtp1.xxxx            (recommended: per-device credential)
+;   Legacy (shared API key):
 ;     /ApiKey=XXXXXXXX /ClientId=5 /ContactId=12 /Priority=Medium
 
 #define MyAppName "RivetPanel"
@@ -585,14 +587,23 @@ begin
   ConfigPage.Add('Client ID:', False);
   ConfigPage.Add('Contact ID (optional):', False);
   ConfigPage.Add('Priority (Low / Medium / High / Critical):', False);
+  ConfigPage.Add('Enrollment token (recommended; replaces the API key, client and contact below):', False);
 
   ConfigPage.Values[0] := ConfigDefault('RivetBaseUrl', 'rivet_base_url', ExistingJson, 'https://');
   ConfigPage.Values[1] := ConfigDefault('ApiKey', 'api_key', ExistingJson, '');
   ConfigPage.Values[2] := ConfigDefault('ClientId', 'client_id', ExistingJson, '');
   ConfigPage.Values[3] := ConfigDefault('ContactId', 'contact_id', ExistingJson, '');
   ConfigPage.Values[4] := ConfigDefault('Priority', 'priority', ExistingJson, 'Medium');
+  ConfigPage.Values[5] := ConfigDefault('EnrollmentToken', 'enrollment_token', ExistingJson, '');
 
   CreatePickerPage;
+end;
+
+// With an enrollment token the server knows the client and contact, so the
+// legacy client/contact picker is not needed.
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := (PageID = PickerPage.ID) and (Trim(ConfigPage.Values[5]) <> '');
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -608,15 +619,15 @@ begin
       exit;
     end;
 
-    if Trim(ConfigPage.Values[1]) = '' then
+    if (Trim(ConfigPage.Values[5]) = '') and (Trim(ConfigPage.Values[1]) = '') then
     begin
-      MsgBox('Please enter the API key.', mbError, MB_OK);
+      MsgBox('Please enter the enrollment token (or, for a legacy install, the API key).', mbError, MB_OK);
       Result := False;
       exit;
     end;
   end;
 
-  if CurPageID = PickerPage.ID then
+  if (CurPageID = PickerPage.ID) and (Trim(ConfigPage.Values[5]) = '') then
   begin
     if (Trim(ConfigPage.Values[2]) = '') or
        (StrToIntDef(Trim(ConfigPage.Values[2]), -1) < 0) then
@@ -663,7 +674,7 @@ end;
 
 procedure WriteConfigFile;
 var
-  BaseUrl, ApiKey, ClientId, ContactId, Priority: String;
+  BaseUrl, ApiKey, ClientId, ContactId, Priority, EnrollToken: String;
   ContactJson: String;
   Json: String;
   ConfigDir, ConfigPath: String;
@@ -673,6 +684,7 @@ begin
   ClientId := Trim(ConfigPage.Values[2]);
   ContactId := Trim(ConfigPage.Values[3]);
   Priority := Trim(ConfigPage.Values[4]);
+  EnrollToken := Trim(ConfigPage.Values[5]);
 
   if Priority = '' then
     Priority := 'Medium';
@@ -682,6 +694,14 @@ begin
   else
     ContactJson := ContactId;
 
+  if EnrollToken <> '' then
+    // Device-token install: no shared API key on disk. The server derives the
+    // client and contact from the token; the app swaps it for its own credential.
+    Json := '{' + #13#10 +
+      '    "rivet_base_url": "' + JsonEscape(BaseUrl) + '",' + #13#10 +
+      '    "enrollment_token": "' + JsonEscape(EnrollToken) + '"' + #13#10 +
+      '}' + #13#10
+  else
   Json := '{' + #13#10 +
     '    "rivet_base_url": "' + JsonEscape(BaseUrl) + '",' + #13#10 +
     '    "api_key": "' + JsonEscape(ApiKey) + '",' + #13#10 +

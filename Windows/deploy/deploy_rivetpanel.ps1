@@ -41,7 +41,12 @@
 param(
     [Parameter(Mandatory = $true)] [string]$InstallerUrl,
     [Parameter(Mandatory = $true)] [string]$RivetBaseUrl,
-    [Parameter(Mandatory = $true)] [string]$ApiKey,
+    # Preferred: an enrollment token (fleet token for a mass deployment) minted on
+    # the RivetIT/RivetMSP Deploy page. The server knows the client and contact, and
+    # no shared API key is ever placed on the PC.
+    [string]$EnrollmentToken = "",
+    # Legacy: shared API key plus client/contact lookup.
+    [string]$ApiKey = "",
     [int]$ClientId = 0,
     [string]$ClientName = "",
     [int]$ContactId = 0,
@@ -50,6 +55,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $EnrollmentToken -and -not $ApiKey) {
+    throw "Pass -EnrollmentToken (recommended) or, for a legacy install, -ApiKey."
+}
 
 # Picks the single result whose name matches exactly (case-insensitive), or
 # the sole result if the search only returned one candidate - otherwise
@@ -75,7 +84,7 @@ function Resolve-SingleMatch {
     throw "'$Name' is ambiguous among RivetIT/RivetMSP ${Kind}s: $list. Pass the ID directly instead."
 }
 
-if ($ClientId -le 0) {
+if (-not $EnrollmentToken -and $ClientId -le 0) {
     if (-not $ClientName) {
         throw "Either -ClientId or -ClientName is required."
     }
@@ -87,7 +96,7 @@ if ($ClientId -le 0) {
     Write-Host "Resolved client '$ClientName' -> id $ClientId ('$($client.name)')"
 }
 
-if ($ContactId -le 0 -and $ContactName) {
+if (-not $EnrollmentToken -and $ContactId -le 0 -and $ContactName) {
     Write-Host "Looking up RivetIT/RivetMSP contact '$ContactName' for client $ClientId ..."
     $uri = "$($RivetBaseUrl.TrimEnd('/'))/api/v1/contacts?client_id=$ClientId&search=$([uri]::EscapeDataString($ContactName))&limit=10"
     $resp = Invoke-RestMethod -Uri $uri -Headers @{ "X-Api-Key" = $ApiKey } -UseBasicParsing
@@ -107,12 +116,13 @@ $installerArgs = @(
     "/VERYSILENT",
     "/SUPPRESSMSGBOXES",
     "/NORESTART",
-    "/RivetBaseUrl=$RivetBaseUrl",
-    "/ApiKey=$ApiKey",
-    "/ClientId=$ClientId",
-    "/ContactId=$contactArg",
-    "/Priority=$Priority"
+    "/RivetBaseUrl=$RivetBaseUrl"
 )
+if ($EnrollmentToken) {
+    $installerArgs += "/EnrollmentToken=$EnrollmentToken"
+} else {
+    $installerArgs += @("/ApiKey=$ApiKey", "/ClientId=$ClientId", "/ContactId=$contactArg", "/Priority=$Priority")
+}
 
 Write-Host "Running installer silently (first install can take a minute or two if the Visual C++ Runtime needs to be downloaded)..."
 $proc = Start-Process -FilePath $installerPath -ArgumentList $installerArgs -PassThru

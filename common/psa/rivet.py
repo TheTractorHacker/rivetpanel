@@ -64,7 +64,7 @@ class RivetProvider(PSAProvider):
 
     # ── Tickets ──────────────────────────────────────────────────────────
 
-    def create_ticket(self, subject, details, *, category_id=None, files=None):
+    def create_ticket(self, subject, details, *, category_id=None, files=None, request_id=None):
         cfg = self.config
         data = {
             "subject": subject,

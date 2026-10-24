@@ -24,6 +24,7 @@ jobs:
       - name: Tests
         run: |
           python tests/test_provider.py
+          python tests/test_panel_provider.py
           xvfb-run -a python tests/test_security.py
 
   build-windows:

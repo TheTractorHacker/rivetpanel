@@ -74,7 +74,30 @@ cp -R "$SRC_APP" "$APP_DEST"
 
 mkdir -p "$CONFIG_DIR"
 
-if [ -n "$RIVET_BASE_URL" ] && [ -n "$API_KEY" ] && [ -n "$CLIENT_ID" ]; then
+lock_config() {
+    # The app runs as the logged-in user (LaunchAgent), not root, so 600
+    # would lock it out - but the API key must not be world-readable. Keep it
+    # root-owned (users cannot redirect the app) and grant read through an ACL
+    # to the console user plus anyone in RIVETPANEL_USERS (space separated).
+    chown root:wheel "$CONFIG_PATH"
+    chmod 600 "$CONFIG_PATH"
+    CONSOLE_USER="$(stat -f%Su /dev/console 2>/dev/null || true)"
+    for u in $CONSOLE_USER ${SUDO_USER:-} ${RIVETPANEL_USERS:-}; do
+        [ "$u" != "root" ] && [ "$u" != "loginwindow" ] && id "$u" >/dev/null 2>&1 && chmod +a "user:$u allow read" "$CONFIG_PATH"
+    done
+}
+
+if [ -n "$RIVET_BASE_URL" ] && [[ "$API_KEY" == rvtp1.* ]]; then
+    # Device-token install: the second argument is an enrollment token, no
+    # shared API key is stored. The server knows the client and contact.
+    python3 -c "
+import json, sys
+with open(sys.argv[3], 'w') as f:
+    json.dump({'rivet_base_url': sys.argv[1], 'enrollment_token': sys.argv[2]}, f, indent=4)
+    f.write('\n')
+" "$RIVET_BASE_URL" "$API_KEY" "$CONFIG_PATH"
+    lock_config
+elif [ -n "$RIVET_BASE_URL" ] && [ -n "$API_KEY" ] && [ -n "$CLIENT_ID" ]; then
     if [ -n "$CONTACT_ID" ]; then
         CONTACT_JSON="$CONTACT_ID"
     else
@@ -94,16 +117,7 @@ with open(sys.argv[6], 'w') as f:
     json.dump(data, f, indent=4)
     f.write('\n')
 " "$RIVET_BASE_URL" "$API_KEY" "$CLIENT_ID" "$CONTACT_JSON" "$PRIORITY" "$CONFIG_PATH"
-    # The app runs as the logged-in user (LaunchAgent), not root, so 600
-    # would lock it out - but the API key must not be world-readable. Keep it
-    # root-owned (users cannot redirect the app) and grant read through an ACL
-    # to the console user plus anyone in RIVETPANEL_USERS (space separated).
-    chown root:wheel "$CONFIG_PATH"
-    chmod 600 "$CONFIG_PATH"
-    CONSOLE_USER="$(stat -f%Su /dev/console 2>/dev/null || true)"
-    for u in $CONSOLE_USER ${SUDO_USER:-} ${RIVETPANEL_USERS:-}; do
-        [ "$u" != "root" ] && [ "$u" != "loginwindow" ] && id "$u" >/dev/null 2>&1 && chmod +a "user:$u allow read" "$CONFIG_PATH"
-    done
+    lock_config
 elif [ ! -f "$CONFIG_PATH" ]; then
     echo "No config.json exists and no connection settings were passed." >&2
     echo "Usage: $0 <rivet_base_url> <api_key> <client_id> [contact_id] [priority]" >&2
