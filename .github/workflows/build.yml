@@ -25,11 +25,11 @@ jobs:
           pip install -r Linux/requirements.txt pyyaml pip-audit
       - name: Known-vulnerability audit of the shipped dependencies
         run: |
-          for p in Windows Linux macOS; do
-            # pyobjc/winotify are platform-only; audit what resolves on this runner and the cross-platform set
-            grep -v -i -E '^(pyobjc|winotify)' $p/requirements.txt > /tmp/req-$p.txt
-            pip-audit --no-deps --disable-pip -r /tmp/req-$p.txt
-          done
+          # Windows pins exact versions: audit the file as written (winotify is Windows-only, excluded from resolution).
+          grep -v -i '^winotify' Windows/requirements.txt > /tmp/req-windows.txt
+          pip-audit --no-deps --disable-pip -r /tmp/req-windows.txt
+          # Linux/macOS use floors: audit what actually resolved in this environment (same cross-platform set).
+          pip-audit --skip-editable
       - name: Tests
         env:
           RIVETPANEL_STRICT_DEPS: '1'
