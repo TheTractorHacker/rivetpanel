@@ -15,22 +15,21 @@ menu, and the tray icon / event loop wiring.
 import base64
 import getpass
 import hashlib
+import hmac
 import io
 import json
 import os
 import platform
-import shlex
+import re
 import shutil
 import socket
 import subprocess
 import sys
-import tarfile
 import tempfile
 import threading
 import time
 import uuid
 import webbrowser
-import zipfile
 
 import requests
 from cryptography.exceptions import InvalidSignature
@@ -40,6 +39,7 @@ import pystray
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+import updater_security as usec
 from psa import get_provider_class, get_provider_name
 from psa.base import ChatUnavailable
 
@@ -96,6 +96,35 @@ BORDER = "#d7dce5"
 TEXT_MUTED = "#5b6573"
 
 
+def _write_private_file(path, content, mode=0o600, binary=False):
+    """Create a new file (never following a symlink, never overwriting)."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, mode)
+    with os.fdopen(fd, "wb" if binary else "w") as f:
+        f.write(content)
+
+
+_SECRET_RE = re.compile(r"(rvpd_[0-9a-f]{8,}|rvtp1\.[0-9a-f]+\.[0-9a-f]+|(?i:x-api-key|api_key|authorization|bearer)[\"': =]+[^\s\"',}]+)")
+
+
+def redact(text):
+    """Strip anything credential-shaped from text before it is shown or logged."""
+    return _SECRET_RE.sub("[redacted]", str(text))
+
+
+def config_file_trusted(path):
+    """POSIX: a config that redirects the app (server URL, enrollment token)
+    must not be writable by group/others, and must be owned by root or the
+    current user. Windows relies on the ProgramData ACL set by the installer."""
+    if os.name != "posix":
+        return True
+    st = os.stat(path)
+    if st.st_mode & 0o022:
+        return False
+    return st.st_uid in (0, os.geteuid())
+
+
+
 def app_dir():
     """Directory containing the running script, or the PyInstaller binary."""
     if getattr(sys, "frozen", False):
@@ -132,7 +161,13 @@ def data_dir():
     else:
         base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
         path = os.path.join(base, app_folder_slug())
-    os.makedirs(path, exist_ok=True)
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    if os.name == "posix":
+        try:
+            if os.stat(path).st_uid == os.geteuid():
+                os.chmod(path, 0o700)
+        except OSError:
+            pass
     return path
 
 
@@ -141,8 +176,15 @@ def load_config(extra_paths):
     candidates = list(extra_paths) + [os.path.join(app_dir(), "config.json")]
     for path in candidates:
         if path and os.path.isfile(path):
+            if not config_file_trusted(path):
+                raise PermissionError(
+                    f"{path} is writable by other users or owned by someone else; refusing to use it.")
+            if os.path.getsize(path) > 64 * 1024:
+                raise ValueError(f"{path} is unexpectedly large.")
             with open(path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
+            if not isinstance(cfg, dict):
+                raise ValueError(f"{path} must contain a JSON object.")
             cfg["_source"] = path
             return cfg
     raise FileNotFoundError(
@@ -413,7 +455,7 @@ def get_public_ip():
         resp.raise_for_status()
         return resp.json().get("ip", "Unknown")
     except Exception as exc:
-        return f"Could not determine public IP: {exc}"
+        return f"Could not determine public IP: {redact(exc)}"
 
 
 def ping_host(host="google.com"):
@@ -545,7 +587,7 @@ def save_to_queue(subject, details, category_id, files_payload, request_id=None)
     files_payload: list of (field_name, filename, bytes, content_type)
     """
     item_dir = os.path.join(queue_dir(), str(int(time.time() * 1000)))
-    os.makedirs(item_dir, exist_ok=True)
+    os.makedirs(item_dir, mode=0o700, exist_ok=True)
 
     payload = {"subject": subject, "details": details, "category_id": category_id, "request_id": request_id}
     with open(os.path.join(item_dir, "payload.json"), "w", encoding="utf-8") as f:
@@ -553,7 +595,7 @@ def save_to_queue(subject, details, category_id, files_payload, request_id=None)
 
     manifest = []
     for i, (field_name, filename, content, content_type) in enumerate(files_payload):
-        stored_as = f"file_{i}_{filename}"
+        stored_as = f"file_{i}_{re.sub(r'[^A-Za-z0-9._-]', '_', os.path.basename(filename))[:80]}"
         with open(os.path.join(item_dir, stored_as), "wb") as f:
             f.write(content)
         manifest.append({
@@ -563,6 +605,21 @@ def save_to_queue(subject, details, category_id, files_payload, request_id=None)
 
     with open(os.path.join(item_dir, "files.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f)
+
+
+def _queue_file_path(item_dir, stored_as):
+    """Resolve a queued attachment strictly inside its queue item folder: the
+    manifest is data on disk, so it is never trusted to name an arbitrary file."""
+    if (not isinstance(stored_as, str) or stored_as != os.path.basename(stored_as)
+            or stored_as in ("", ".", "..") or "\\" in stored_as):
+        raise ValueError("Unsafe queued attachment name.")
+    path = os.path.join(item_dir, stored_as)
+    real = os.path.realpath(path)
+    if os.path.dirname(real) != os.path.realpath(item_dir) or os.path.islink(path) or not os.path.isfile(real):
+        raise ValueError("Queued attachment is not a plain file inside its queue folder.")
+    if os.path.getsize(real) > MAX_ATTACHMENT_BYTES:
+        raise ValueError("Queued attachment is too large.")
+    return real
 
 
 def flush_queue(config, provider):
@@ -588,8 +645,9 @@ def flush_queue(config, provider):
                 if manifest:
                     files = []
                     for entry in manifest:
-                        with open(os.path.join(item_dir, entry["stored_as"]), "rb") as fh:
-                            files.append((entry["field"], entry["filename"], fh.read(), entry["content_type"]))
+                        stored = _queue_file_path(item_dir, entry["stored_as"])
+                        with open(stored, "rb") as fh:
+                            files.append((entry["field"], entry["filename"], fh.read(MAX_ATTACHMENT_BYTES + 1), entry["content_type"]))
 
             ticket = provider.create_ticket(
                 payload["subject"], payload["details"],
@@ -618,7 +676,9 @@ def load_tracked_tickets():
     if os.path.isfile(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+            return [t for t in data if isinstance(t, dict) and isinstance(t.get("id"), (int, str))
+                    and str(t["id"]).isdigit()] if isinstance(data, list) else []
         except Exception:
             return []
     return []
@@ -940,10 +1000,11 @@ def _verify_release_asset(assets, asset_name, downloaded_path):
             actual_hash.update(chunk)
     actual_hash = actual_hash.hexdigest()
 
-    if actual_hash != expected_hash:
+    if not hmac.compare_digest(actual_hash, expected_hash.lower()):
         raise ReleaseVerificationError(
             f"Checksum mismatch for '{asset_name}': expected {expected_hash}, got {actual_hash}."
         )
+    return actual_hash
 
 
 # ── Ticket entry window ─────────────────────────────────────────────────────
@@ -1134,7 +1195,7 @@ class TicketWindow:
             else:
                 messagebox.showerror(
                     APP_NAME,
-                    "Couldn't capture a screenshot on this system:\n" + str(exc),
+                    "Couldn't capture a screenshot on this system:\n" + redact(exc),
                 )
             return
         finally:
@@ -1181,7 +1242,7 @@ class TicketWindow:
             result = self._send_ticket(subject, details)
             self.window.after(0, self._submit_success, result)
         except Exception as exc:
-            self.window.after(0, self._submit_error, str(exc))
+            self.window.after(0, self._submit_error, redact(exc))
 
     def _send_ticket(self, subject, details):
         if self.include_sysinfo_var.get():
@@ -1317,7 +1378,7 @@ class RecentTicketsWindow:
         try:
             tickets = self.provider.list_tickets(limit=15)
         except Exception as exc:
-            self.root.after(0, self._show_error, str(exc))
+            self.root.after(0, self._show_error, redact(exc))
             return
 
         self.root.after(0, self._populate, tickets)
@@ -1496,7 +1557,7 @@ class TicketChatWindow:
             messages = self.provider.poll_chat(ticket_id, since_id=since_id)
         except Exception as exc:
             if ticket_id == self.ticket_id and since_id == 0:
-                self.root.after(0, self._show_error, str(exc))
+                self.root.after(0, self._show_error, redact(exc))
             return
 
         if ticket_id != self.ticket_id:
@@ -1551,7 +1612,7 @@ class TicketChatWindow:
             self.provider.send_chat_message(ticket_id, message)
         except Exception as exc:
             if ticket_id == self.ticket_id:
-                self.root.after(0, lambda: messagebox.showerror(APP_NAME, f"Couldn't send message: {exc}"))
+                self.root.after(0, lambda: messagebox.showerror(APP_NAME, f"Couldn't send message: {redact(exc)}"))
             return
 
         if ticket_id == self.ticket_id:
@@ -1631,7 +1692,7 @@ def run_app(config_paths, icon_path=None):
         # themselves so just inform them clearly.
         root = tk.Tk()
         root.withdraw()
-        messagebox.showerror(APP_NAME, str(exc))
+        messagebox.showerror(APP_NAME, redact(exc))
         sys.exit(1)
 
     provider = get_provider_class()(config)
@@ -1747,7 +1808,7 @@ def run_app(config_paths, icon_path=None):
                 if not asset:
                     root.after(0, lambda: messagebox.showerror(APP_NAME, "Windows installer not found in release."))
                     return
-                dest = os.path.join(tmp_dir, asset["name"])
+                dest = os.path.join(tmp_dir, usec.safe_asset_name(asset["name"]))
                 _download_asset(asset["browser_download_url"], dest)
                 _verify_release_asset(assets, asset["name"], dest)
                 subprocess.Popen([dest, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
@@ -1763,28 +1824,15 @@ def run_app(config_paths, icon_path=None):
                 if not asset:
                     root.after(0, lambda: messagebox.showerror(APP_NAME, "macOS update not found in release."))
                     return
-                dest = os.path.join(tmp_dir, asset["name"])
+                dest = os.path.join(tmp_dir, usec.safe_asset_name(asset["name"]))
                 _download_asset(asset["browser_download_url"], dest)
-                _verify_release_asset(assets, asset["name"], dest)
-                with zipfile.ZipFile(dest, "r") as z:
-                    for name in z.namelist():
-                        if ".." not in name and not name.startswith("/"):
-                            z.extract(name, tmp_dir)
-                new_app = os.path.join(tmp_dir, "RivetPanel.app")
-                if not os.path.isdir(new_app):
-                    raise RuntimeError("RivetPanel.app not found in update package")
+                zip_sha = _verify_release_asset(assets, asset["name"], dest)
+                usec.check_zip(dest, "RivetPanel.app")
 
-                # Detached script: waits for us to exit, replaces bundle, relaunches
+                # Detached script: waits for us to exit, re-verifies the signed zip
+                # on a root-owned copy, replaces the bundle, relaunches.
                 updater = os.path.join(tmp_dir, "apply_update.sh")
-                with open(updater, "w") as f:
-                    f.write(f"""#!/bin/bash
-sleep 2
-rm -rf {shlex.quote(app_bundle)}
-cp -R {shlex.quote(new_app)} {shlex.quote(app_bundle)} 2>/dev/null \\
-  || sudo cp -R {shlex.quote(new_app)} {shlex.quote(app_bundle)}
-open -a {shlex.quote(app_bundle)}
-""")
-                os.chmod(updater, 0o755)
+                _write_private_file(updater, usec.macos_update_script(dest, app_bundle, zip_sha), 0o700)
                 subprocess.Popen(["bash", updater])
                 _notify(icon, f"Installing v{tag} — restarting...", title=APP_NAME)
                 time.sleep(1)
@@ -1797,31 +1845,20 @@ open -a {shlex.quote(app_bundle)}
                 if not asset:
                     root.after(0, lambda: messagebox.showerror(APP_NAME, "Linux update not found in release."))
                     return
-                dest = os.path.join(tmp_dir, asset["name"])
+                dest = os.path.join(tmp_dir, usec.safe_asset_name(asset["name"]))
                 _download_asset(asset["browser_download_url"], dest)
                 _verify_release_asset(assets, asset["name"], dest)
-                with tarfile.open(dest, "r:gz") as t:
-                    for member in t.getmembers():
-                        if ".." not in member.name and not member.name.startswith("/"):
-                            t.extract(member, tmp_dir)
+                # Read the one file we need straight out of the verified archive
+                # (links/devices refused), hash those exact bytes, and let the
+                # privileged install re-check that hash on its own copy.
+                binary_bytes = usec.read_tar_file(dest, "RivetPanel")
                 new_binary = os.path.join(tmp_dir, "RivetPanel")
-                if not os.path.isfile(new_binary):
-                    raise RuntimeError("RivetPanel binary not found in update package")
-                os.chmod(new_binary, 0o755)
+                _write_private_file(new_binary, binary_bytes, 0o700, binary=True)
+                binary_sha = hashlib.sha256(binary_bytes).hexdigest()
 
-                # Detached script: waits for our PID to exit, replaces binary, relaunches
                 updater = os.path.join(tmp_dir, "apply_update.sh")
-                with open(updater, "w") as f:
-                    f.write(f"""#!/bin/bash
-PID={os.getpid()}
-while kill -0 "$PID" 2>/dev/null; do sleep 0.5; done
-cp -f {shlex.quote(new_binary)} {shlex.quote(current_binary)} 2>/dev/null \\
-  || sudo cp -f {shlex.quote(new_binary)} {shlex.quote(current_binary)}
-chmod +x {shlex.quote(current_binary)}
-nohup {shlex.quote(current_binary)} >/dev/null 2>&1 &
-disown
-""")
-                os.chmod(updater, 0o755)
+                _write_private_file(
+                    updater, usec.linux_update_script(os.getpid(), new_binary, current_binary, binary_sha), 0o700)
                 subprocess.Popen(["bash", updater])
                 _notify(icon, f"Installing v{tag} — restarting...", title=APP_NAME)
                 time.sleep(1)
@@ -1833,7 +1870,7 @@ disown
                 _notify(icon, f"{APP_NAME} v{tag} available.", title=APP_NAME)
 
         except Exception as exc:
-            root.after(0, lambda: messagebox.showerror(APP_NAME, f"Update failed: {exc}"))
+            root.after(0, lambda: messagebox.showerror(APP_NAME, f"Update failed: {redact(exc)}"))
 
     def do_check_update(icon=None, item=None):
         def worker():

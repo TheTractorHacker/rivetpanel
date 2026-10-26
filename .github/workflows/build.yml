@@ -13,32 +13,50 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
       - name: Install dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y xvfb python3-tk
-          pip install -r Linux/requirements.txt
+          pip install -r Linux/requirements.txt pyyaml pip-audit
+      - name: Known-vulnerability audit of the shipped dependencies
+        run: |
+          for p in Windows Linux macOS; do
+            # pyobjc/winotify are platform-only; audit what resolves on this runner and the cross-platform set
+            grep -v -i -E '^(pyobjc|winotify)' $p/requirements.txt > /tmp/req-$p.txt
+            pip-audit --no-deps --disable-pip -r /tmp/req-$p.txt
+          done
       - name: Tests
+        env:
+          RIVETPANEL_STRICT_DEPS: '1'
         run: |
           python tests/test_provider.py
           python tests/test_panel_provider.py
+          python tests/test_workflow_security.py
+          python tests/test_container_security.py
+          python tests/test_dependencies.py
           xvfb-run -a python tests/test_security.py
+          xvfb-run -a python tests/test_path_security.py
+          xvfb-run -a python tests/test_auth_credentials.py
 
   build-windows:
     permissions:
       contents: write
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       # Pinned explicitly (rather than relying on windows-latest's default)
       # since the installer now refuses to run on non-x64 Windows
       # (ArchitecturesAllowed=x64 in RivetPanel.iss) - a 32-bit build here
       # would produce an exe the installer itself would reject.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
           architecture: 'x64'
@@ -63,7 +81,7 @@ jobs:
         run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\RivetPanel.iss'
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: rivetpanel-windows
           path: |
@@ -72,7 +90,7 @@ jobs:
 
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
             Windows/dist/RivetPanel.exe
@@ -85,9 +103,11 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
 
@@ -119,14 +139,14 @@ jobs:
           tar -czf rivetpanel-linux.tar.gz -C package .
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: rivetpanel-linux
           path: Linux/rivetpanel-linux.tar.gz
 
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: Linux/rivetpanel-linux.tar.gz
         env:
@@ -137,9 +157,11 @@ jobs:
       contents: write
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
 
@@ -165,14 +187,14 @@ jobs:
           cd package && zip -r ../rivetpanel-macos.zip .
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: rivetpanel-macos
           path: macOS/rivetpanel-macos.zip
 
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: macOS/rivetpanel-macos.zip
         env:
@@ -193,9 +215,11 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
 
@@ -203,7 +227,7 @@ jobs:
         run: pip install "cryptography>=50.0.2"
 
       - name: Download all platform artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
 
@@ -219,7 +243,7 @@ jobs:
             dist/rivetpanel-macos/rivetpanel-macos.zip
 
       - name: Upload checksums + signature to the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
             signed/checksums.txt

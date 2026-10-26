@@ -134,7 +134,7 @@ class RivetProvider(PSAProvider):
 
     def get_ticket(self, ticket_id):
         resp = self._get(
-            f"{self._base_url()}/api/v1/tickets/{ticket_id}",
+            f"{self._base_url()}/api/v1/tickets/{int(ticket_id)}",
             headers=self._headers(),
             timeout=15,
         )
@@ -165,7 +165,7 @@ class RivetProvider(PSAProvider):
 
     def poll_chat(self, ticket_id, since_id=0):
         resp = self._get(
-            f"{self._base_url()}/api/v1/tickets/{ticket_id}/chat",
+            f"{self._base_url()}/api/v1/tickets/{int(ticket_id)}/chat",
             params={"since_id": since_id},
             headers=self._headers(),
             timeout=15,
@@ -191,7 +191,7 @@ class RivetProvider(PSAProvider):
         if cfg.get("contact_id"):
             body["contact_id"] = cfg["contact_id"]
         resp = self._post(
-            f"{self._base_url()}/api/v1/tickets/{ticket_id}/chat",
+            f"{self._base_url()}/api/v1/tickets/{int(ticket_id)}/chat",
             headers=self._headers(),
             json=body,
             timeout=15,
@@ -207,7 +207,7 @@ class RivetProvider(PSAProvider):
         $max_runtime) so a short pause and reconnect on any disconnect is
         the expected steady state, not an error.
         """
-        url = f"{self._base_url()}/api/v1/tickets/{ticket_id}/chat"
+        url = f"{self._base_url()}/api/v1/tickets/{int(ticket_id)}/chat"
         params = {"stream": 1}
 
         while not stop_event.is_set():

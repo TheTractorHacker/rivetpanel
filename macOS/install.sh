@@ -36,6 +36,9 @@ OLD_LAUNCH_AGENT_DEST="/Library/LaunchAgents/com.itflow.quickticket.plist"
 
 RIVET_BASE_URL="${1:-}"
 API_KEY="${2:-}"
+# The enrollment token can also come from the environment, which keeps it out of the
+# process list (`ps`) while the installer runs: RIVETPANEL_ENROLLMENT_TOKEN=rvtp1... ./install.sh <url>
+if [ -z "$API_KEY" ] && [ -n "${RIVETPANEL_ENROLLMENT_TOKEN:-}" ]; then API_KEY="$RIVETPANEL_ENROLLMENT_TOKEN"; fi
 CLIENT_ID="${3:-}"
 CONTACT_ID="${4:-}"
 PRIORITY="${5:-Medium}"

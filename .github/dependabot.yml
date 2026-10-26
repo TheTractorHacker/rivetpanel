@@ -1,0 +1,19 @@
+# Keeps the SHA-pinned GitHub Actions and the Python dependencies current:
+# Dependabot opens a PR per update (it rewrites the pinned SHA and the version
+# comment together), so pins stay reviewed AND maintainable.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}
+    groups:
+      actions: {patterns: ["*"]}
+  - package-ecosystem: pip
+    directory: /Windows
+    schedule: {interval: weekly}
+  - package-ecosystem: pip
+    directory: /Linux
+    schedule: {interval: weekly}
+  - package-ecosystem: pip
+    directory: /macOS
+    schedule: {interval: weekly}
