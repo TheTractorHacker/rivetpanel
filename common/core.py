@@ -44,7 +44,7 @@ from psa import get_provider_class, get_provider_name
 from psa.base import ChatUnavailable
 
 APP_NAME = "RivetPanel"
-VERSION = "2.1.10"
+VERSION = "2.2.0"
 GITHUB_REPO = "TheTractorHacker/rivetpanel"
 
 # Ed25519 public key for verifying release authenticity before the self-update
