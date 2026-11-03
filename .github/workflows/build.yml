@@ -42,6 +42,7 @@ jobs:
           xvfb-run -a python tests/test_security.py
           xvfb-run -a python tests/test_path_security.py
           xvfb-run -a python tests/test_auth_credentials.py
+          xvfb-run -a python tests/test_ticket_window.py
 
   build-windows:
     permissions:

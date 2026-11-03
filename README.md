@@ -38,6 +38,19 @@ and chat for that client and nothing else, and an administrator can revoke it pe
 short-lived) covers an RMM mass deployment. Installs that still carry the legacy `api_key` keep working until redeployed.
 The server side is the RivetCore Panel API ([PANEL_API.md](https://github.com/TheTractorHacker/rivet-core/blob/main/docs/panel/PANEL_API.md)).
 
+## One tap, one sentence
+
+The ticket window is built to be finished in seconds by someone who is already having a bad day:
+
+- **Your screen is already attached.** It is captured the instant the window opens, shown as a thumbnail, and removable with one
+  click (`"auto_screenshot": false` in `config.json` turns the automatic capture off). Only the technicians see it.
+- **Tap what's wrong.** Printer, Wi-Fi, email, slowness, lockouts: one tap is a complete request. No subject line, no dropdown.
+- **Or write one sentence.** The subject and the category are worked out for you ("Filed under: Printing"); a manual category
+  choice always wins.
+- **A confirmation that means something.** Request number, what happens next, and a **Chat with a technician** button. If the
+  PC is offline the request is saved and sent automatically, exactly once.
+- Everything else (file attachment, category override, system info) is one click away under *More options*.
+
 ## Features
 
 - New Ticket window with subject, description, screenshot, and file

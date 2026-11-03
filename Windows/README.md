@@ -182,6 +182,7 @@ once the update finishes, with no manual download/rerun needed.
 | `check_for_updates`     | no       | Silently check GitHub for newer releases on startup (default `true`) |
 | `accent_color`          | no       | Hex color (e.g. `"#16a34a"`) to re-brand the accent color used in the New Ticket window |
 | `company_name`          | no       | Shown in the New Ticket header ("<name> will get back to you...") |
+| `auto_screenshot`       | no       | `false` stops the app capturing the screen when the ticket window opens (default `true`; the user can always remove it) |
 | `support_phone`         | no       | Adds a "Call Support" tray menu item (tel: link) |
 | `support_email`         | no       | Adds an "Email Support" tray menu item (mailto: link) |
 | `branding_logo`         | no       | Absolute path to a `.png` to use as the tray icon and window header logo instead of the default RivetIT/RivetMSP icon |

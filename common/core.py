@@ -369,6 +369,16 @@ def setup_style(root, accent=None):
     )
     style.map("Treeview.Heading", background=[("active", "#e3e8f2")])
     style.layout("Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
+    style.configure("Chip.TButton", font=base_font, background=CARD_BG, foreground="#1f2533",
+                    bordercolor="#b9c4dc", lightcolor="#b9c4dc", darkcolor="#b9c4dc", borderwidth=1, padding=(10, 11), relief="solid")
+    style.map("Chip.TButton", background=[("active", "#eef3ff")], bordercolor=[("active", accent_color)],
+              lightcolor=[("active", accent_color)], darkcolor=[("active", accent_color)])
+    style.configure("ChipOn.TButton", font=bold_font, background=accent_color, foreground="white",
+                    bordercolor=accent_color, lightcolor=accent_color, darkcolor=accent_color, borderwidth=1,
+                    padding=(10, 11), relief="flat")
+    style.map("ChipOn.TButton", background=[("active", accent_dark)])
+    style.configure("Link.TButton", font=base_font, background=BG, foreground=accent_color, borderwidth=0, padding=(0, 2))
+    style.map("Link.TButton", foreground=[("active", accent_dark)], background=[("active", BG)])
     style.configure("Header.TFrame", background=CARD_BG)
     style.configure("Header.TLabel", background=CARD_BG, foreground="#1f2533", font=title_font)
     style.configure("HeaderMuted.TLabel", background=CARD_BG, foreground=TEXT_MUTED)
@@ -1009,8 +1019,77 @@ def _verify_release_asset(assets, asset_name, downloaded_path):
 
 # ── Ticket entry window ─────────────────────────────────────────────────────
 
+# ── "Tap, don't type" helpers ───────────────────────────────────────────────
+
+# (label shown on the chip, keywords that map it to one of the server's categories)
+QUICK_PICKS = [
+    ("Printer problem", "print"),
+    ("Can't get online", "network"),
+    ("Email / Outlook", "mail"),
+    ("Computer is slow", "hardware"),
+    ("Locked out / password", "account"),
+    ("Something else", None),
+]
+
+# text keywords -> words to look for in the server's category names
+_CATEGORY_RULES = {
+    "print": (("print", "scan", "toner", "paper jam"), ("print",)),
+    "mail": (("email", "e-mail", "outlook", "mailbox", "inbox"), ("mail",)),
+    "network": (("wifi", "wi-fi", "internet", "network", "vpn", "offline", "can't connect", "cant connect"),
+                ("network", "wi-fi", "wifi", "internet", "connect")),
+    "account": (("password", "locked out", "login", "log in", "sign in", "account", "mfa", "2fa"),
+                ("account", "password", "access", "login", "identity")),
+    "hardware": (("screen", "monitor", "keyboard", "mouse", "laptop", "battery", "slow", "freez", "frozen", "crash"),
+                 ("hardware", "computer", "desktop", "device")),
+    "software": (("install", "software", "excel", "word", "teams", "update"), ("software", "application", "app")),
+}
+
+
+def _category_for_rule(rule, categories):
+    wanted = _CATEGORY_RULES[rule][1]
+    for c in categories:
+        name = (c.name or "").lower()
+        if any(w in name for w in wanted):
+            return c
+    return None
+
+
+def suggest_category(text, categories, pick_rule=None):
+    """Best server category for what the user typed / tapped, or None.
+    A chip's rule wins; otherwise the first keyword rule that matches the text."""
+    if not categories:
+        return None
+    if pick_rule:
+        return _category_for_rule(pick_rule, categories)
+    low = (text or "").lower()
+    for rule, (words, _names) in _CATEGORY_RULES.items():
+        if any(w in low for w in words):
+            hit = _category_for_rule(rule, categories)
+            if hit:
+                return hit
+    return None
+
+
+def derive_subject(text, pick_label=None, limit=80):
+    """A ticket subject from the free text (first sentence) and/or the tapped chip."""
+    first = re.split(r"(?<=[.!?])\s|\n", (text or "").strip(), maxsplit=1)[0].strip()
+    if len(first) > limit:
+        first = first[: limit - 1].rsplit(" ", 1)[0].rstrip(",;:- ") + "…"
+    if pick_label and pick_label != "Something else":
+        return f"{pick_label}: {first}" if first else pick_label
+    return first
+
+
+# ── Ticket entry window ─────────────────────────────────────────────────────
+
 class TicketWindow:
-    """The popup ticket-entry window. One instance reused per open."""
+    """The popup ticket window: one tap or one sentence, screen already attached.
+
+    Opens with a screenshot of what the user was looking at already captured
+    (shown as a removable thumbnail - set "auto_screenshot": false to turn the
+    automatic capture off), quick-pick chips for the common problems, and a
+    single text box. Subject and category are derived; everything else lives
+    under "More options"."""
 
     def __init__(self, root, config, provider, icon_path=None):
         self.root = root
@@ -1022,8 +1101,34 @@ class TicketWindow:
         self.categories = []
         self.selected_category_id = 0
         self.window = None
-        self._header_img = None
+        self.open_chat = None          # set by run_app: callable(ticket_id, number, subject)
+        self._header_keep = []
         self._thumb_image = None
+        self._pick = None              # (label, rule) of the tapped chip
+        self._chip_buttons = {}
+        self._category_manual = False
+        self._more_open = False
+        self._capture_error = None
+
+    # -- capture --------------------------------------------------------
+
+    def _grab_screen(self):
+        """Capture the screen (before our window exists). Returns a PIL image or None."""
+        try:
+            return ImageGrab.grab()
+        except Exception as exc:
+            self._capture_error = exc
+            return None
+
+    def _set_screenshot(self, image):
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        self.screenshot_bytes = buf.getvalue()
+        thumb = image.copy()
+        thumb.thumbnail((168, 100))
+        self._thumb_image = ImageTk.PhotoImage(thumb)
+
+    # -- build ----------------------------------------------------------
 
     def show(self):
         if self.window is not None and self.window.winfo_exists():
@@ -1035,156 +1140,210 @@ class TicketWindow:
         self.screenshot_bytes = None
         self.attached_file_path = None
         self.selected_category_id = 0
+        self._pick = None
+        self._category_manual = False
+        self._more_open = False
+        self._capture_error = None
+        self._thumb_image = None
+
+        # Grab the screen BEFORE the window exists so it shows the problem, not our form.
+        if self.config.get("auto_screenshot", True):
+            time.sleep(0.12)  # let a closing tray menu repaint away
+            image = self._grab_screen()
+            if image is not None:
+                self._set_screenshot(image)
 
         win = tk.Toplevel(self.root)
         win.title(APP_NAME)
         win.resizable(False, False)
         win.configure(bg=BG)
         win.attributes("-topmost", True)
-        win.protocol("WM_DELETE_WINDOW", win.destroy)
+        win.protocol("WM_DELETE_WINDOW", self._close)
+        win.bind("<Escape>", lambda e: self._close())
+        win.bind("<Control-Return>", lambda e: self.submit())
         if self.icon_path and os.path.isfile(self.icon_path):
             try:
                 win.iconbitmap(self.icon_path)
             except tk.TclError:
                 pass
         self.window = win
+        self._build_form()
+        self._center()
+        self.details_text.focus_set()
 
+    def _company(self):
+        return self.config.get("company_name") or "IT"
+
+    def _accent(self):
+        return self.config.get("accent_color") or ACCENT
+
+    def _build_form(self):
+        win = self.window
         self._header_keep = []
         build_window_header(
-            win, "New Support Ticket",
-            (f"{self.config['company_name']} will get back to you as soon as possible"
-             if self.config.get("company_name") else "We'll get back to you as soon as possible"),
-            self.icon_path, accent=self.config.get("accent_color") or ACCENT, keep=self._header_keep,
+            win, "What's going wrong?",
+            f"Tap what fits, or just tell {self._company()} in a sentence.",
+            self.icon_path, accent=self._accent(), keep=self._header_keep,
         )
-        outer = ttk.Frame(win, padding=(20, 16, 20, 20), style="TFrame")
-        outer.pack(fill="both", expand=True)
+        self.body = ttk.Frame(win, padding=(20, 16, 20, 20), style="TFrame")
+        self.body.pack(fill="both", expand=True)
+        outer = self.body
 
-        # Subject
-        ttk.Label(outer, text="Subject", style="FieldLabel.TLabel").pack(anchor="w", pady=(0, 4))
-        self.subject_entry = ttk.Entry(outer, width=46)
-        self.subject_entry.pack(fill="x", pady=(0, 14))
+        # Quick-pick chips (tap, don't type)
+        chips = ttk.Frame(outer, style="TFrame")
+        chips.pack(fill="x", pady=(0, 14))
+        for col in range(2):
+            chips.columnconfigure(col, weight=1, uniform="chip")
+        self._chip_buttons = {}
+        for i, (label, rule) in enumerate(QUICK_PICKS):
+            btn = ttk.Button(chips, text=label, style="Chip.TButton",
+                             command=lambda l=label, r=rule: self._pick_chip(l, r))
+            btn.grid(row=i // 2, column=i % 2, sticky="we", padx=(0, 6) if i % 2 == 0 else (6, 0), pady=3)
+            self._chip_buttons[label] = btn
 
-        # Category (only shown if the server has ticket categories configured)
-        if self.categories:
-            ttk.Label(outer, text="Category", style="FieldLabel.TLabel").pack(anchor="w", pady=(0, 4))
-            self.category_var = tk.StringVar(value="Uncategorized")
-            category_names = ["Uncategorized"] + [c.name for c in self.categories]
-            self.category_combo = ttk.Combobox(
-                outer, textvariable=self.category_var, values=category_names,
-                state="readonly", width=43,
-            )
-            self.category_combo.pack(fill="x", pady=(0, 14))
-            self.category_combo.bind("<<ComboboxSelected>>", self._on_category_selected)
-
-        # Description
-        ttk.Label(outer, text="Describe the issue", style="FieldLabel.TLabel").pack(anchor="w", pady=(0, 4))
-        text_frame = tk.Frame(outer, bg=BORDER, padx=1, pady=1)
-        text_frame.pack(fill="x", pady=(0, 14))
+        # One text box
+        self.details_label = ttk.Label(outer, text="Tell us what's happening", style="FieldLabel.TLabel")
+        self.details_label.pack(anchor="w", pady=(0, 4))
+        frame = tk.Frame(outer, bg=BORDER, padx=1, pady=1)
+        frame.pack(fill="x")
         self.details_text = tk.Text(
-            text_frame,
-            width=46,
-            height=7,
-            relief="flat",
-            bg=CARD_BG,
-            fg="#1f2533",
-            insertbackground="#1f2533",
-            font=("Segoe UI", 10),
-            padx=8,
-            pady=8,
-            wrap="word",
+            frame, width=50, height=4, relief="flat", bg=CARD_BG, fg="#1f2533", insertbackground="#1f2533",
+            font=("Segoe UI", 10), padx=10, pady=8, wrap="word", undo=True, highlightthickness=0, borderwidth=0,
         )
         self.details_text.pack(fill="both", expand=True)
+        self.details_text.bind("<KeyRelease>", self._on_text)
+        self.filed_label = ttk.Label(outer, text="", style="Muted.TLabel")
+        self.filed_label.pack(anchor="w", pady=(4, 10))
 
-        # System info checkbox
-        self.include_sysinfo_var = tk.BooleanVar(value=self.config.get("include_system_info", True))
-        ttk.Checkbutton(
-            outer, text="Include system info (helps us diagnose faster)",
-            variable=self.include_sysinfo_var,
-        ).pack(anchor="w", pady=(0, 10))
+        # Screen card: already captured, one click to remove
+        self.shot_card = tk.Frame(outer, bg=CARD_BG, highlightbackground=BORDER, highlightthickness=1)
+        self.shot_card.pack(fill="x", pady=(0, 10))
+        self.shot_thumb = tk.Label(self.shot_card, bg=CARD_BG)
+        self.shot_thumb.pack(side="left", padx=10, pady=10)
+        shot_text = tk.Frame(self.shot_card, bg=CARD_BG)
+        shot_text.pack(side="left", fill="both", expand=True, pady=10)
+        self.shot_title = ttk.Label(shot_text, text="", style="Card.TLabel", font=("Segoe UI", 10, "bold"))
+        self.shot_title.pack(anchor="w")
+        self.shot_sub = ttk.Label(shot_text, text="", style="Muted.Card.TLabel", wraplength=230, justify="left")
+        self.shot_sub.pack(anchor="w", pady=(2, 6))
+        shot_btns = tk.Frame(shot_text, bg=CARD_BG)
+        shot_btns.pack(anchor="w")
+        self.retake_btn = ttk.Button(shot_btns, text="Retake", style="Secondary.TButton", command=self.take_screenshot)
+        self.retake_btn.pack(side="left", padx=(0, 6))
+        self.remove_btn = ttk.Button(shot_btns, text="Remove", style="Secondary.TButton", command=self.remove_screenshot)
+        self.remove_btn.pack(side="left")
+        self._refresh_screenshot_card()
 
-        # Screenshot preview area
-        preview_frame = tk.Frame(outer, bg=CARD_BG, highlightbackground=BORDER, highlightthickness=1)
-        preview_frame.pack(fill="x", pady=(0, 10))
-        self.preview_label = tk.Label(
-            preview_frame,
-            text="No screenshot attached",
-            fg=TEXT_MUTED,
-            bg=CARD_BG,
-            font=("Segoe UI", 9),
-            height=6,
-        )
-        self.preview_label.pack(fill="both", expand=True, padx=2, pady=2)
-
-        # Screenshot buttons
-        btn_row = ttk.Frame(outer, style="TFrame")
-        btn_row.pack(fill="x", pady=(0, 10))
-        btn_row.columnconfigure(0, weight=1)
-        btn_row.columnconfigure(1, weight=1)
-
-        self.screenshot_btn = ttk.Button(
-            btn_row, text="Attach Screenshot", style="Secondary.TButton", command=self.take_screenshot
-        )
-        self.screenshot_btn.grid(row=0, column=0, sticky="we", padx=(0, 6))
-
-        self.remove_btn = ttk.Button(
-            btn_row, text="Remove Screenshot", style="Secondary.TButton", command=self.remove_screenshot, state="disabled"
-        )
-        self.remove_btn.grid(row=0, column=1, sticky="we", padx=(6, 0))
-
-        # File attachment
-        file_row = ttk.Frame(outer, style="TFrame")
-        file_row.pack(fill="x", pady=(0, 14))
-        self.attach_file_btn = ttk.Button(
-            file_row, text="Attach File", style="Secondary.TButton", command=self.choose_file
-        )
+        # More options (collapsed)
+        self.more_toggle = ttk.Button(outer, text="More options  ▾", style="Link.TButton", command=self._toggle_more)
+        self.more_toggle.pack(anchor="w", pady=(0, 4))
+        self.more = ttk.Frame(outer, style="TFrame")
+        if self.categories:
+            ttk.Label(self.more, text="Category", style="FieldLabel.TLabel").pack(anchor="w", pady=(4, 4))
+            self.category_var = tk.StringVar(value="Let us choose")
+            names = ["Let us choose"] + [c.name for c in self.categories]
+            self.category_combo = ttk.Combobox(self.more, textvariable=self.category_var, values=names,
+                                               state="readonly", width=43)
+            self.category_combo.pack(fill="x", pady=(0, 10))
+            self.category_combo.bind("<<ComboboxSelected>>", self._on_category_selected)
+        file_row = ttk.Frame(self.more, style="TFrame")
+        file_row.pack(fill="x", pady=(0, 8))
+        self.attach_file_btn = ttk.Button(file_row, text="Attach a file", style="Secondary.TButton", command=self.choose_file)
         self.attach_file_btn.pack(side="left")
         self.file_label = ttk.Label(file_row, text="No file attached", style="Muted.TLabel")
         self.file_label.pack(side="left", padx=(10, 0))
+        self.include_sysinfo_var = tk.BooleanVar(value=self.config.get("include_system_info", True))
+        ttk.Checkbutton(self.more, text="Include system info (helps us fix it faster)",
+                        variable=self.include_sysinfo_var).pack(anchor="w", pady=(0, 4))
 
-        # Status + submit
-        self.status_label = ttk.Label(outer, text="", style="Muted.TLabel", wraplength=380)
-        self.status_label.pack(fill="x", pady=(0, 8))
-
-        self.submit_btn = ttk.Button(outer, text="Submit Ticket", style="Accent.TButton", command=self.submit)
+        # Send
+        self.status_label = ttk.Label(outer, text="", style="Muted.TLabel", wraplength=420)
+        self.status_label.pack(fill="x", pady=(6, 6))
+        self.submit_btn = ttk.Button(outer, text=f"Send to {self._company()}", style="Accent.TButton", command=self.submit)
         self.submit_btn.pack(fill="x")
+        ttk.Label(outer, text="Ctrl+Enter to send  ·  Esc to close", style="Muted.TLabel").pack(pady=(8, 0))
 
+    def _center(self):
+        win = self.window
         win.update_idletasks()
-        # Center on screen
         w, h = win.winfo_width(), win.winfo_height()
         sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
-        win.geometry(f"+{(sw - w) // 2}+{(sh - h) // 2}")
+        win.geometry(f"+{(sw - w) // 2}+{max(0, (sh - h) // 3)}")
 
-        self.subject_entry.focus_set()
+    # -- interaction ----------------------------------------------------
+
+    def _toggle_more(self):
+        self._more_open = not self._more_open
+        if self._more_open:
+            self.more.pack(fill="x", before=self.status_label)
+            self.more_toggle.configure(text="Fewer options  ▴")
+        else:
+            self.more.pack_forget()
+            self.more_toggle.configure(text="More options  ▾")
+        self._center()
+
+    def _pick_chip(self, label, rule):
+        self._pick = None if self._pick and self._pick[0] == label else (label, rule)
+        for name, btn in self._chip_buttons.items():
+            btn.configure(style="ChipOn.TButton" if self._pick and self._pick[0] == name else "Chip.TButton")
+        self.details_label.configure(
+            text="Anything else we should know? (optional)" if self._pick else "Tell us what's happening")
+        self._update_filed_under()
+        self.details_text.focus_set()
+
+    def _on_text(self, event=None):
+        self._update_filed_under()
+
+    def _update_filed_under(self):
+        if self._category_manual or not self.categories:
+            return
+        text = self.details_text.get("1.0", "end").strip()
+        cat = suggest_category(text, self.categories, self._pick[1] if self._pick else None)
+        self.selected_category_id = cat.id if cat else 0
+        self.filed_label.configure(text=f"Filed under: {cat.name}" if cat else "")
 
     def _on_category_selected(self, event=None):
         name = self.category_var.get()
-        self.selected_category_id = next(
-            (c.id for c in self.categories if c.name == name), 0
-        )
+        match = next((c for c in self.categories if c.name == name), None)
+        self._category_manual = match is not None
+        self.selected_category_id = match.id if match else 0
+        self.filed_label.configure(text=f"Filed under: {match.name}" if match else "")
+        if not match:
+            self._update_filed_under()
 
     def choose_file(self):
         path = filedialog.askopenfilename(parent=self.window, title="Select a file to attach")
         if path:
             self.attached_file_path = path
             self.file_label.configure(text=os.path.basename(path))
-            self.attach_file_btn.configure(text="Change File")
+            self.attach_file_btn.configure(text="Change file")
+
+    def _refresh_screenshot_card(self):
+        if self.screenshot_bytes:
+            self.shot_thumb.configure(image=self._thumb_image, text="")
+            self.shot_title.configure(text="Your screen is attached")
+            self.shot_sub.configure(text=f"So {self._company()} can see exactly what you see. Only they will see it.")
+            self.retake_btn.configure(text="Retake")
+            self.remove_btn.pack(side="left")
+        else:
+            self.shot_thumb.configure(image="", text="🖥", fg=TEXT_MUTED, font=("Segoe UI", 26), width=6)
+            self.shot_title.configure(text="No screenshot")
+            self.shot_sub.configure(text="Adding one usually gets this solved faster.")
+            self.retake_btn.configure(text="Attach screenshot")
+            self.remove_btn.pack_forget()
 
     def take_screenshot(self):
-        # Hide our window so it isn't part of the capture
+        """Hide the window, capture the screen, show the window again."""
         self.window.withdraw()
         self.window.update()
         time.sleep(0.3)
-
-        try:
-            screenshot = ImageGrab.grab()
-        except Exception as exc:
-            self.window.deiconify()
-            self.window.lift()
+        image = self._grab_screen()
+        self.window.deiconify()
+        self.window.lift()
+        if image is None:
             if platform.system() == "Linux" and os.environ.get("XDG_SESSION_TYPE") == "wayland":
-                # scrot/maim need X11; grim only works on wlroots compositors
-                # (Sway etc.), not GNOME/KDE's Wayland - none of them can be
-                # fixed by installing a different tool under a GNOME/KDE
-                # Wayland session.
+                # scrot/maim need X11; grim only works on wlroots compositors (Sway etc.),
+                # not GNOME/KDE Wayland - installing a different tool cannot fix that.
                 messagebox.showerror(
                     APP_NAME,
                     "Couldn't capture a screenshot: this session is running Wayland, "
@@ -1193,54 +1352,44 @@ class TicketWindow:
                     "choose \"Ubuntu on Xorg\" (or your distro's X11 session), then try again.",
                 )
             else:
-                messagebox.showerror(
-                    APP_NAME,
-                    "Couldn't capture a screenshot on this system:\n" + redact(exc),
-                )
+                messagebox.showerror(APP_NAME, "Couldn't capture a screenshot on this system:\n" + redact(self._capture_error))
             return
-        finally:
-            self.window.deiconify()
-            self.window.lift()
-
-        buf = io.BytesIO()
-        screenshot.save(buf, format="PNG")
-        self.screenshot_bytes = buf.getvalue()
-
-        thumb = screenshot.copy()
-        thumb.thumbnail((300, 140))
-        self._thumb_image = ImageTk.PhotoImage(thumb)
-        self.preview_label.configure(image=self._thumb_image, text="")
-
-        self.screenshot_btn.configure(text="Retake Screenshot")
-        self.remove_btn.configure(state="normal")
+        self._set_screenshot(image)
+        self._refresh_screenshot_card()
 
     def remove_screenshot(self):
         self.screenshot_bytes = None
         self._thumb_image = None
-        self.preview_label.configure(image="", text="No screenshot attached")
-        self.screenshot_btn.configure(text="Attach Screenshot")
-        self.remove_btn.configure(state="disabled")
+        self._refresh_screenshot_card()
+
+    # -- submit ---------------------------------------------------------
+
+    def _compose(self):
+        """(subject, details) from the text box and the tapped chip, or (None, None)."""
+        text = self.details_text.get("1.0", "end").strip()
+        label = self._pick[0] if self._pick else None
+        subject = derive_subject(text, label)
+        if not subject:
+            return None, None
+        details = text or f"Quick report from the tray app: {label}."
+        return subject, details
 
     def submit(self):
-        subject = self.subject_entry.get().strip()
-        details = self.details_text.get("1.0", "end").strip()
-
+        subject, details = self._compose()
         if not subject:
-            messagebox.showwarning(APP_NAME, "Please enter a subject.")
+            self.status_label.configure(text="Tap what's wrong above, or type a sentence first.",
+                                        style="Card.TLabel", foreground="#b91c1c")
+            self.details_text.focus_set()
             return
-
-        self.submit_btn.configure(state="disabled", text="Submitting...")
+        self.submit_btn.configure(state="disabled", text="Sending…")
         self.status_label.configure(text="", style="Muted.TLabel")
         self.window.update()
-
-        threading.Thread(
-            target=self._submit_worker, args=(subject, details), daemon=True
-        ).start()
+        threading.Thread(target=self._submit_worker, args=(subject, details), daemon=True).start()
 
     def _submit_worker(self, subject, details):
         try:
             result = self._send_ticket(subject, details)
-            self.window.after(0, self._submit_success, result)
+            self.window.after(0, self._submit_success, result, subject)
         except Exception as exc:
             self.window.after(0, self._submit_error, redact(exc))
 
@@ -1273,27 +1422,54 @@ class TicketWindow:
             track_new_ticket(ticket.id, ticket.number, subject)
         return ticket
 
-    def _submit_success(self, result=None):
-        if isinstance(result, dict) and result.get("queued"):
-            self.status_label.configure(
-                text="No connection right now - your ticket was saved and will be "
-                     "submitted automatically once you're back online.",
-                style="Card.TLabel", foreground="#b45309",
-            )
+    def _submit_success(self, result=None, subject=""):
+        """Replace the form with a confirmation that says what happens next."""
+        for child in self.window.winfo_children():
+            child.destroy()
+        self._header_keep = []
+        queued = isinstance(result, dict) and result.get("queued")
+        accent = "#b45309" if queued else "#15803d"
+        tk.Frame(self.window, bg=accent, height=4).pack(fill="x")
+        box = ttk.Frame(self.window, padding=(28, 26, 28, 24), style="TFrame")
+        box.pack(fill="both", expand=True)
+        badge = tk.Canvas(box, width=64, height=64, bg=BG, highlightthickness=0)
+        badge.pack(pady=(0, 12))
+        badge.create_oval(2, 2, 62, 62, fill=accent, outline="")
+        badge.create_line(19, 33, 28, 42, 45, 23, fill="white", width=5, capstyle="round", joinstyle="round")
+        if queued:
+            title = "Saved - we'll send it when you're online"
+            sub = "No connection right now. Your request is stored safely and goes out automatically."
         else:
-            self.status_label.configure(text="Ticket submitted successfully!", style="Card.TLabel", foreground="#15803d")
-        self.window.update()
-        self.window.after(1800, self._close)
+            number = getattr(result, "number", "") or getattr(result, "id", "")
+            title = f"Request #{number} sent" if number else "Request sent"
+            sub = (f"{self._company()} has your report" + (" and a screenshot" if self.screenshot_bytes else "")
+                   + ". You'll get a notification here when a technician replies.")
+        ttk.Label(box, text=title, style="Title.TLabel").pack()
+        ttk.Label(box, text=sub, style="Muted.TLabel", wraplength=360, justify="center").pack(pady=(6, 16))
+        row = ttk.Frame(box, style="TFrame")
+        row.pack(fill="x")
+        tid = getattr(result, "id", None)
+        if not queued and tid and self.open_chat:
+            ttk.Button(row, text="Chat with a technician", style="Accent.TButton",
+                       command=lambda: (self._close(), self.open_chat(tid, getattr(result, "number", tid), subject))
+                       ).pack(fill="x", pady=(0, 8))
+        ttk.Button(row, text="Done", style="Secondary.TButton", command=self._close).pack(fill="x")
+        self.window.bind("<Return>", lambda e: self._close())
+        self._center()
 
     def _submit_error(self, message):
-        self.submit_btn.configure(state="normal", text="Submit Ticket")
-        self.status_label.configure(text=f"Failed to submit: {message}", style="Card.TLabel", foreground="#b91c1c")
+        self.submit_btn.configure(state="normal", text=f"Send to {self._company()}")
+        self.status_label.configure(text=f"Couldn't send: {message}", style="Card.TLabel", foreground="#b91c1c")
 
     def _close(self):
         if self.window is not None:
-            self.window.destroy()
+            try:
+                self.window.destroy()
+            except tk.TclError:
+                pass
             self.window = None
         self.screenshot_bytes = None
+        self._thumb_image = None
         self.attached_file_path = None
 
 
@@ -1712,6 +1888,8 @@ def run_app(config_paths, icon_path=None):
     ticket_window = TicketWindow(root, config, provider, icon_path=icon_path)
     chat_window = TicketChatWindow(root, config, provider, mark_read=mark_chat_read) if provider.supports_chat else None
     recent_window = RecentTicketsWindow(root, config, provider, chat_window=chat_window)
+    if chat_window:
+        ticket_window.open_chat = lambda tid, number, subject: root.after(0, lambda: chat_window.show(int(tid), number, subject))
 
     # Load ticket categories in the background so the dropdown is ready
     # by the time the user opens the New Ticket window. No-op for providers
